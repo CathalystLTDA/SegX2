@@ -1,0 +1,185 @@
+# SegX — Destinations per class in the OD table (P9): what the Philadelphia data says
+
+**Status:** **implemented and run** on the full Philadelphia dataset (LODES, 1,282,647 home→work
+flows).
+
+---
+
+## 1. The measure
+
+For every **origin** (residence block), every trip **category** and every demographic **class**,
+the analysis reads from the OD table:
+
+| column | what it is |
+|---|---|
+| `n_destinations` | distinct destinations the class reaches from that origin |
+| `effective_destinations` | `2^H` over each destination's share: how many *equally used* destinations would produce the same concentration (40 destinations with 97 % of the flow in one are worth 1.2, not 40) |
+| `rarefied_destinations` | the same with **every class reduced to the same head-count** — see §3 |
+| `rarefaction_n` | the common head-count used at that origin (the mass of the smallest class present) |
+| `top_share`, `concentration` | share of the largest destination; `Σ pᵢ²` (Herfindahl) |
+| `mean_distance_m`, `max_distance_m` | **straight-line** origin→destination distance, weighted by flow. Not network distance: nothing has been routed yet, and that is stamped on the output (`distance_basis`) |
+| `radius_of_gyration_m` | standard distance of the destinations around their own centre of mass — the **size of the activity space**, independent of how far from home it is. Someone travelling 8 km to a single district has a high mean distance and a zero radius of gyration |
+
+And, between **pairs of classes** at the same origin: Jaccard of the destination sets, cosine of
+the share vectors, and the directional pair `shared_share_a` / `shared_share_b` — the fraction of
+each class's flow that lands where the other one also goes.
+
+Absence is `NaN`, never zero: "no worker of this class lives here" is a different fact from
+"this class goes nowhere from here".
+
+---
+
+## 2. What was measured in Philadelphia
+
+Full dataset: **1,282,647 flows**, 44,109 origin blocks, 24,522 destination blocks, 1,383,988
+workers. LODES classes of the job's earnings (SE01/SE02/SE03).
+
+**Per origin, person-weighted mean:**
+
+| class | workers | origins | destinations (raw) | effective | **rarefied (paired)** | mean dist. | radius of gyration |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| low | 290,808 | 40,282 | 14.82 | 14.53 | **13.54** | 10.66 km | 10.55 km |
+| mid | 395,315 | 41,184 | 20.37 | 19.91 | **13.33** | 10.94 km | 11.08 km |
+| high | 697,865 | 43,004 | 35.48 | 33.01 | **12.76** | 12.74 km | 11.93 km |
+
+*Paired rarefied = computed only over the **38,016 blocks where all three classes coexist**, so
+that each class's mean is taken over the same places.*
+
+**Aggregated over the whole city** (where each class works, summing all origins):
+
+| class | distinct work blocks | **effective blocks** (`2^H`) |
+|---|---:|---:|
+| low | 17,004 | **4,600** |
+| mid | 19,522 | **4,494** |
+| high | 17,207 | **2,119** |
+
+---
+
+## 3. The trap, and why it has to be in this report
+
+Destination counts are confounded by group size almost deterministically: a group of 300 workers
+touches more workplaces than a group of 3, however confined it is. Since high income is, in
+Philadelphia, the most numerous class per block, **the raw number mostly measures group size**.
+No column of a count table would reveal that.
+
+The fix is to compare the classes **at the same head-count** — rarefaction, in the sense of
+Hurlbert (1971), the standard instrument for comparing species richness between samples of
+different sizes. At each origin, `n` is the mass of the smallest class present, and each class
+is asked how many destinations `n` of its own members would reach.
+
+**Two forms were tested, and the intuitive one gives the wrong sign.** The closed form with
+replacement, `Σ_d [1 − (1 − p_d)^n]`, looks equivalent and is not: drawing 2 people from a class
+of 2 collides half the time, while drawing 2 from a class of 10 collides a tenth of the time — it
+**charges the smaller class for collisions between people who are distinct**, reintroducing into
+the correction an attenuated version of the very bias it was meant to remove. Two workers going
+to two places are two destinations, whatever the class. Only the hypergeometric form (without
+replacement) says that:
+
+```
+rarefied(origin, class) = Σ_d [ 1 − C(M − m_d, n) / C(M, n) ]
+```
+
+With the wrong form the numbers were 9.02 / 9.73 / 10.45 — high income reaching **more**. With
+the correct form, 13.37 / 13.13 / 12.44 — high income reaching **less**. The unit test
+`test_rarefaction_removes_the_group_size_confound` pins the hypergeometric form on a
+hand-computed case precisely for that reason.
+
+**An honest caveat on the reading:** since low income is usually the smallest class at an
+origin, `n` tends to be almost all of its mass, and the low-income number stays close to the
+observed one. In practice the comparison is *"high income reduced to the size of low income,
+against the whole of low income"*. It is the correct paired comparison, but it is worth knowing
+what it is doing. The same pattern appears on the smaller Center City clip (1,261 flows, 138
+origins): raw 4.86 / 4.65 / 12.90, paired rarefied 3.67 / 3.69 / 3.16.
+
+---
+
+## 4. The finding that remains
+
+After the control, **the three classes reach practically the same number of workplaces from
+home** (12.8–13.5), with a marginal, monotonic advantage for low income. The 2.4× inequality of
+the raw number does not exist as an inequality of reach.
+
+What does exist is in the aggregate: the three classes cover a similar number of work blocks in
+the city (17.0k / 19.5k / 17.2k), but high-income jobs are concentrated in **2,119 effective
+blocks against low income's 4,600** — less than half the spatial spread, with twice the workers.
+The segregation readable in this table is **where the jobs are**, not how far each group travels.
+That is consistent with high income having the largest mean distance (12.7 km) and the largest
+radius of gyration: longer trips converging on a smaller set of destinations.
+
+**Overlap between classes** (fraction of shared destinations, per origin, person-weighted):
+
+| pair | Jaccard | cosine | A's flow landing where B goes | B's flow landing where A goes |
+|---|---:|---:|---:|---:|
+| low \| mid | 0.0139 | 0.032 | 3.5 % | 2.6 % |
+| low \| high | **0.0128** | 0.035 | 4.9 % | 2.3 % |
+| mid \| high | 0.0183 | 0.050 | 5.8 % | 3.8 % |
+
+The income extremes are the pair that shares destinations **least**, and the asymmetry is the
+expected one (a larger fraction of low income's flow lands where high income goes than the
+reverse). But **these numbers are only interpretable against each other, not against 1.0**: with
+24,522 candidate blocks and a few dozen destinations per class per origin, two classes drawn at
+random would also share almost nothing. A sparsity-corrected baseline is not implemented — see
+§8.
+
+---
+
+## 5. What was built
+
+- **`segx/analysis/`** — a new package for analyses of the **input tables**, as opposed to
+  `segx/metrics/`, whose plugins all need a routed network. The split is practical: this analysis
+  runs in seconds on a new OD file, before committing hours to a full run — and when it says the
+  classes go to the same places, the expensive run afterwards will not find segregation the table
+  does not contain.
+- **`segx od-report`** — its own command, with no OSM and no routing; writes four CSVs (per
+  origin, summary, overlap per origin, overlap summary).
+- **`analyse_od_spread` stage** in the pipeline (`orchestrator.analyse_od`), exposed to the native
+  app via RPC in `result["od_spread"]`.
+- **Destination identity in the loader** (`dest_id`): explicit column → `dest_id_ref` (the
+  `wGEOID` that already placed the point) → rounded coordinates. Without a destination identity,
+  the count degenerates into a row count.
+- **Declared applicability**: the analysis is only non-trivial when the per-class counts are **in
+  the OD file itself** (`demographics.attribute_source = "od"`). With the class vector on the
+  demographics file, every flow from an origin carries its whole composition and every class
+  would report the same destination set by construction — a tautology, not a finding. In that
+  case the engine says so in words and skips the stage, instead of failing the run.
+
+---
+
+## 6. How to reproduce
+
+```bash
+uv run segx od-report \
+    -d <census_blocks.shp> \
+    --od <lodes_od.csv> \
+    -c demo/segx_lodes.toml \
+    -o out/tables_full
+```
+
+The Philadelphia input files are not included in this repository; any LODES OD file with the
+matching census block geometry works. ~35 s on the full dataset. The per-origin tables can be
+joined to the block geometry by `origin_id`, for a map of *where* reach is narrow and for whom.
+
+---
+
+## 7. Cost
+
+Negligible, and that is the most important difference from fragmentation (P8): no network is
+downloaded, nothing is snapped, no Dijkstra runs. The whole measure is a vectorised pass over the
+table — 1.3 million flows in ~35 s, including reading a 53-thousand-polygon shapefile.
+
+---
+
+## 8. Methodological choices
+
+| # | Issue | Current default | What changes |
+|---|---|---|---|
+| 8.1 | **Which column to report** | both are emitted | `n_destinations` is the literal count and is not comparable between groups of different sizes; `rarefied_destinations` is the size-controlled one. A result built on the first would claim a 2.4× inequality that does not exist |
+| 8.2 | **Structural reading** | the aggregate columns are emitted alongside | the defensible conclusion of this table is the concentration of jobs (2,119 vs 4,600 effective blocks), not individual reach |
+| 8.3 | **Overlap baseline** | not implemented | today only the *order* of the pairs is interpretable. A sparsity-corrected null (the rarefaction idea applied to the intersection) would make Jaccard readable in absolute value |
+| 8.4 | **Mirrored analysis, per destination** | not implemented | grouping by workplace and asking which classes arrive there is the same table read the other way round |
+| 8.5 | **Rarefaction `n`: per origin or global** | per origin (the smallest class present) | a fixed `n` for the whole city would make means across origins directly summable, at the cost of dropping origins smaller than `n` |
+| 8.6 | **`min_mass`** | 0.0 (counts every non-zero flow) | LODES has a huge tail of 1-person flows. Raising it to 1 or 5 answers "where do *at least* N people of this class go" and changes the raw counts considerably |
+| 8.7 | **LODES income classes** | SE01/SE02/SE03 | these are bands of the **job's earnings**, the closest income proxy available in LODES, not the resident's household income |
+
+None of these changes the architecture; all are configuration values or a choice of which column
+to report.

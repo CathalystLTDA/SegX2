@@ -1,0 +1,275 @@
+# SegX — Path Fragmentation Index (P8): what is implemented and what remains open
+
+**Status:** **fragmentation (D)** is implemented and runs in the engine, measured per
+trajectory, with the paper's method (box counting on 0.7 m × 5ᵏ pixels). **Not** implemented: the
+number of activities **A**, the composed measure **M = D · A**, and aggregation per person/origin.
+Two of the methodological choices below have a provisional default in force that changes the
+numbers if reverted.
+**Previous document:** [MetricFormulas.md](MetricFormulas.md) describes the per-segment metrics
+(P4 + P5). This measure differs from them in kind: it is not a property of a street segment, it
+is a property of a whole path.
+
+---
+
+## 1. One-line summary
+
+The paper's fragmentation method is implemented as published, with two provisional corrections
+(§5.1 and §5.2); on the Philadelphia test clip it measures 100 % of the paths, but **it does not
+separate the income classes** — the differences in D between groups are within one standard
+deviation.
+
+---
+
+## 2. The measure as published
+
+> *"We assess mobility in personal urban trajectories using a composed measure of: (1) extent;
+> (2) number of activities performed during the work day; and (3) fragmentation, i.e. the number
+> of street segments used by actors (…). Fragmentation in spatial trajectories is analysed through
+> their linear fractal dimension and Mandelbrot's method (Mandelbrot, 1983)."*
+
+```
+N = k · r^(1−D)                         log N = log K + (1−D) log r        M = D · A
+```
+
+> *"Trajectories are converted into pixels in different resolutions, considering increasing detail
+> according to scale (the 'Richardson Effect'). We opted for a 0.7 m pixel and a scaling factor of
+> 5 times (r = 0.7, 3.5, 17.5, 87.5, 437.5, 2187.5)."* — where **N is the number of pixels** at
+> each resolution, r the scale factor and K the proportionality constant.
+
+---
+
+## 3. What is implemented
+
+**The computation.** Each routed trajectory is converted into pixels on a 0.7 m grid; the next
+five scales (3.5 / 17.5 / 87.5 / 437.5 / 2187.5 m) come from the same grid, grouping pixels 5 by
+5. At each scale the number of occupied pixels, `N`, is counted, and `D` comes from the slope of
+`log N` against `log r`. The grid is the same for every trajectory, so all are measured at the
+same scales.
+
+**The geometry.** The path follows each street's real geometry (a curved street counts as
+curved, not as the chord between its two corners).
+
+**The unit.** A **trajectory** — one routed origin–destination pair. Not a person and not a day
+(see §5.5).
+
+**Comparing groups.** Each trajectory carries a vector of counts per class, not a single label.
+Each group's value is the **mean of D weighted by the group's presence** on the trajectories, as
+in the *social exposure* metric (P5).
+
+**What comes out with D.** Per transport mode and per class: `D` and its standard deviation, the
+mean number of street segments per path (the literal reading of "number of street segments
+used"), the mean length, the straight-line origin–destination distance and the ratio between the
+two (*detour*). The count of measured paths and the parameters used are also reported.
+
+**Verification.** Pixel counts match the hand computation — a 300 m straight line at 0.7 m
+occupies `⌊300/0.7⌋ + 1 = 429` pixels — and the D values in the table of §5.2 are pinned by tests.
+**No published value from the paper is reproduced**, because its data is not available: the
+fidelity is to the method, not to a known result.
+
+**Not implemented:** the number of activities A, `M = D · A`, the radius of gyration and any
+aggregation per origin or per person.
+
+---
+
+## 4. Result on the test clip (Philadelphia, Center City)
+
+A ~1.3 km × 1.3 km clip, 1,261 LODES origin–destination pairs, income in three bands.
+**The transport mode in this run is synthetic**: LODES carries no mode, so the column was drawn
+at random (45 % car, 35 % public transport, 20 % walk). Differences **between modes** below
+describe the engine, not the city; differences **between classes within a mode** are real data.
+
+Coverage: **1,251 of 1,251** paths with geometry received a D (another 10 had no resolvable
+geometry).
+
+| mode | class | D | std. dev. | segments | length (m) | detour | paths |
+|---|---|---|---|---|---|---|---|
+| car | low | 0.959 | 0.055 | 10.7 | 851 | 1.77 | 126 |
+| car | mid | 0.962 | 0.056 | 10.0 | 809 | 1.72 | 111 |
+| car | high | 0.965 | 0.049 | 11.3 | 952 | 1.60 | 369 |
+| public transport | low | 0.936 | 0.055 | 21.4 | 736 | 1.41 | 91 |
+| public transport | mid | 0.955 | 0.043 | 21.6 | 708 | 1.38 | 92 |
+| public transport | high | 0.952 | 0.050 | 25.8 | 802 | 1.37 | 280 |
+| walk | low | 0.962 | 0.033 | 25.4 | 784 | 1.37 | 51 |
+| walk | mid | 0.952 | 0.045 | 23.1 | 686 | 1.36 | 55 |
+| walk | high | 0.948 | 0.062 | 28.5 | 802 | 1.36 | 181 |
+
+Three readings:
+
+1. **D does not separate the classes on this clip.** Values range from 0.936 to 0.965 with a
+   standard deviation around 0.05 within each group; no difference between classes is
+   distinguishable.
+2. **Every D is below 1.** A line of length L occupies `⌊L/r⌋ + 1` pixels, not `L/r`, and that
+   `+ 1` weighs more at the coarse scales. The effect shrinks with length: a 300 m straight line
+   gives 0.97, 5 km gives 0.973, 20 km gives 0.992. Paths of ~800 m, like those on this clip, are
+   in the range where the bias is the same size as the differences between groups.
+3. **The number of segments and the detour vary more than D.** The high class uses more segments
+   in every mode (11.3 / 25.8 / 28.5), partly because its paths are longer.
+
+A 1.3 km clip is not the right test of the measure: the 2187.5 m scale is larger than the whole
+area. The whole-city run has not been done (see §7).
+
+---
+
+## 5. Methodological issues
+
+### 5.1 Read literally, the equation shifts D by exactly 1
+
+**Default in force:** `D = −slope` (a straight line ≈ 1).
+
+**The problem.** Take a straight line of length L. Counting pixels of side r, the number of
+occupied pixels is `N(r) ≈ L/r`, i.e. `log N` against `log r` has slope **−1**. Applying
+`D = 1 − slope`, as the equation says:
+
+```
+D = 1 − (−1) = 2      →   a straight line would have dimension 2
+```
+
+**The origin.** The equation is Richardson's, where the measured quantity is **length**:
+
+```
+L(r) = N(r) · r ∝ r^(1−D)      ⟹   N(r) = K · r^(−D)
+```
+
+There, `N` is the count of **rulers used to measure the length**, not the count of pixels. The
+two consistent readings are algebraically identical and both give **D = 1** for a straight line.
+Only the literal reading (regressing pixel counts and applying `1 − slope`) is shifted, and the
+shift is **exactly 1**:
+
+```
+D_literal = D_consistent + 1
+```
+
+**Why it matters even though it is a constant.** The shift does not change the ranking by D. But
+it changes the ranking by **M**, because `M_literal = (D + 1) · A = M_consistent + A`, and A
+varies.
+
+**What exists today.** The consistent convention is the default; a configuration option
+(`as_written`) reproduces the literal reading (every value goes up by 1; the table in §4 would
+range from 1.936 to 1.965). Results meant to be compared with published figures should use the
+literal reading.
+
+---
+
+### 5.2 The coarse scales turn D into a function of extent
+
+**Default in force:** scales at which the whole path fits in **one** pixel are left out of the
+fit (`drop_saturated`). **This departs from the published recipe.**
+
+**The problem.** The ladder goes up to **2187.5 m**. Any trajectory shorter than that occupies a
+single pixel at the coarse scales, and `N = 1` means `log N = 0` — a point that pins the fit
+regardless of the trajectory's shape and **pulls D down in proportion to how much shorter the
+path is than the coarse scale**.
+
+| object | D with all 6 scales | D without the 1-pixel scales |
+|---|---|---|
+| straight path, 300 m | 0.802 | 0.969 |
+| closed block, 400 m | 0.843 | 1.031 |
+| straight path, 5 km | 0.973 | 0.973 |
+
+**The same effect on real data.** Running the clip of §4 with all six scales always in the fit:
+
+| mode | class | D without 1-pixel scales | D with all 6 scales | length (m) |
+|---|---|---|---|---|
+| car | low | 0.959 | 0.895 | 851 |
+| car | mid | 0.962 | 0.895 | 809 |
+| car | high | 0.965 | 0.911 | 952 |
+| public transport | low | 0.936 | 0.871 | 736 |
+| public transport | mid | 0.955 | 0.874 | 708 |
+| public transport | high | 0.952 | 0.886 | 802 |
+| walk | low | 0.962 | 0.888 | 784 |
+| walk | mid | 0.952 | 0.874 | 686 |
+| walk | high | 0.948 | 0.886 | 802 |
+
+With all six scales, every D drops by 0.05–0.08 and the standard deviation rises to ~0.07. For
+car and public transport the high class then has the highest D — and it is also the class with
+the longest paths. This clip cannot tell how much of that difference is shape and how much is
+extent; that is exactly the confusion the filter exists to avoid.
+
+**Why it is serious.** The measure treats **extent** and **fragmentation** as *separate*
+components. With saturated scales in the fit, D grows with extent, and the bias is worst for the
+shortest paths.
+
+**A limitation of the filter.** With it, a short path is fitted on 3–4 scales and a long one on
+6. The scales are the same for everyone, but the fitted range varies with path size. Paths with
+fewer than 3 remaining scales get no value (no such case in §4).
+
+---
+
+### 5.3 A (number of activities) — not implemented
+
+**The problem.** In the paper, A is the number of **activity episodes** in a one-day diary, and it
+varies from person to person. The available sources have no diary. The two approximations
+available:
+
+- **facility categories reached** from an origin (school, health, retail…) — the engine routes
+  one trajectory per configured category, and almost all are reachable, so A would be ≈ constant
+  (≈ 6) for practically every origin;
+- **number of distinct work destinations** per origin, in the OD table — this one really varies
+  and is already measured, per class, in [P9ODDestinationSpread.md](P9ODDestinationSpread.md).
+
+With A almost constant, `M = D · A` carries no information beyond D.
+
+---
+
+### 5.4 "Extent" has at least three defensible readings
+
+The paper lists extent as component (1), separate from D and A, but does not define it
+operationally. The candidates:
+
+| measure | what it captures | status |
+|---|---|---|
+| **path length** | how far one travels in total | already reported alongside D |
+| **straight-line origin–destination distance** | how far one gets | already reported alongside D |
+| **radius of gyration** | the spatial spread of the routine — the measure of **Gonzalez, Hidalgo & Barabási (2008)**, cited in the paper's own bibliography | computed in the destination analysis (P9), not here |
+
+---
+
+### 5.5 The unit is a trajectory, not a person or a day
+
+**The problem.** The paper measures **people**, each with the trajectories of one working day.
+The engine measures **one trajectory at a time**: one origin–destination pair. A census block
+with flows to ten workplaces produces ten trajectories, each with its own D.
+
+The alternative is to measure per **origin**: join every trajectory leaving a block and measure
+the set. That is closer to "an actor's day", and it is where A and M would make sense — but the
+"actor" would be a census block, not a person, and the union of ten commutes to ten different
+jobs is nobody's path.
+
+Either way, a block with a 50/50 composition contributes to the means of **both** classes, so the
+contrast between groups is **attenuated by construction**. That is what the data source allows,
+and it should be stated wherever results are reported. Restricting the group comparison to
+origins where one class **dominates** (as *most exclusive segments* already does, P5) is a
+possible refinement.
+
+---
+
+### 5.6 Alternative routes (minor, technical)
+
+When the per-OD route set is on (`k > 1`, off by default), one pair emits *k* alternative routes.
+Each route is currently measured separately and enters the mean with its route-choice weight.
+
+---
+
+## 6. Summary of the methodological choices
+
+| # | Issue | Current state | Impact if changed |
+|---|---|---|---|
+| 5.1 | D convention | `D = −slope` (line ≈ 1) | every D goes up by 1; ranking by **M** changes |
+| 5.2 | 1-pixel scales | left out of the fit | D drops 0.05–0.08 on the clip and starts tracking extent |
+| 5.3 | Definition of A | not implemented | no A means no M |
+| 5.4 | What "extent" is | length and straight line already reported | which column is the answer |
+| 5.5 | Unit of analysis | trajectory | per origin is a different measure, not another estimate of the same one |
+| 5.6 | Alternative routes | each route measured with its weight | relevant only with `k > 1` |
+
+---
+
+## 7. Limitations and next steps
+
+- **Whole-city run not done.** The measured cost is ~7.5 ms for a 12 km path with a 0.7 m pixel;
+  for the full Philadelphia OD file (1.28 million flows) the estimate is on the order of hours.
+  The pixel size is configurable, and a coarser pixel reduces the cost but is no longer the
+  paper's parameter.
+- **No reference value.** The D of a known trajectory from the original study would be the
+  missing test.
+- **§5.1 and §5.2 are configuration changes**, not code changes. §5.3 and §5.5 require new
+  implementation.

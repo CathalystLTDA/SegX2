@@ -1,0 +1,8 @@
+stop_id,stop_name,stop_lat,stop_lon
+S1,First & Main,39.9500,-75.1600
+S2,First & Oak,39.9500,-75.1580
+S3,First & Pine,39.9500,-75.1560
+S4,First & Elm,39.9500,-75.1540
+M1,North Station,39.9520,-75.1600
+M2,South Station,39.9520,-75.1540
+X1,Far Outside,39.9500,-75.0000

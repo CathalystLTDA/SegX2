@@ -1,0 +1,113 @@
+# SegX — demo config for a US city using LODES home→work flows.
+#
+# This wires the engine to read real LEHD/LODES origin-destination data:
+#   * street network + POIs come from OSM (fetched live, cached),
+#   * commute flows + the income vector come from the LODES OD CSV,
+#   * census-block polygons (TIGER/Line) are used only as a geometry/ID lookup.
+#
+# Run with:  uv run python demo/run_demo.py --geometry <blocks.gpkg> --od <lodes.csv>
+# (see demo/README.md). Override any value below with --set, e.g.
+#   --set demographics.polygon_id_column=GEOID10
+
+[crs]
+# Working CRS is auto-derived as the UTM zone of the boundary (metric, required
+# for distance/time routing). Inputs may arrive in any CRS; they're reprojected.
+auto_utm = true
+
+# --- Demographics: sourced from the OD file, not a separate census table. ------
+[demographics]
+attribute_source = "od"          # income vector is summed from the LODES rows
+polygon_id_column = "GEOID"      # block id column in philadelphia_blocks.shp
+population_column = "pop"         # unused in `od` mode (geometry-only lookup)
+
+# LODES earnings classes (Segment-Earnings), one source column per class:
+#   SE01 = jobs paying <= $1,250/month   (low)
+#   SE02 = jobs paying $1,251–$3,333/mo  (mid)
+#   SE03 = jobs paying > $3,333/month     (high)
+# NOTE: these are *earnings of the job*, the closest LODES proxy for income.
+# Whether job earnings are the right segregation dimension is a modelling choice.
+[[demographics.attributes]]
+name = "income"
+kind = "categorical"
+categories = ["low", "mid", "high"]
+class_columns = ["SE01", "SE02", "SE03"]
+
+# --- OD column mapping: standard LODES od file (e.g. *_od_*.csv) ---------------
+[od_columns]
+origin_id_ref = "hGEOID"         # 15-digit home block GEOID -> joined to geometry
+dest_id_ref   = "wGEOID"         # 15-digit work block GEOID -> joined to geometry
+weight        = "S000"           # total workers in the flow; synthesised = SE01+SE02+SE03
+mode          = "mode"           # travel mode per flow: car/bus/subway/walk (see below)
+default_category = "commute"
+
+# Used only when the OD file has NO `mode` column. LODES has none, so the runner
+# synthesises one with --mode-split (default car/bus/subway/walk); the labels are
+# survey labels and `segx.orchestrator._OD_MODE_ALIAS` translates them to graph
+# names (car -> drive, bus/subway/metro/pt -> transit). Without a mode column the
+# whole file falls back to this line, every flow routes on `drive`, and
+# `cross_mode_exposure` degenerates to a copy of `exposure`.
+[od_columns.default_mode_by_category]
+commute = "car"                  # commutes route on the drive graph; access bindings stay walk
+
+# --- Network ------------------------------------------------------------------
+[network]
+# `transit` is added automatically by the runner when the OD file asks for it
+# (--transit / a mode column with bus/subway rows); it is the merged walk ⊕
+# public-transport graph, not an OSM extract of its own.
+modes = ["walk", "drive"]
+osm_snapshot_date = "2026-06-01" # pin OSM for reproducible academic results
+snap_tolerance_m = 250.0
+
+# --- Public transport (P7) ----------------------------------------------------
+# Off by default. `--transit` flips `enabled` and `--gtfs <feed>` points at a real
+# timetable; without a feed the run falls back to OSM, whose headways are INVENTED
+# from `osm_assumed_headway_min` and stamped `transit_source = "osm_assumed"`.
+[transit]
+enabled = false
+source = "auto"                  # gtfs when a feed is configured, else osm
+service_day = "weekday"
+# headway = window_minutes / n_trips, so a WIDER window RAISES the average headway
+# and makes transit look worse. 06:00-09:00 covers the early commute (people do
+# take the bus at 6 a.m.); run a second window and compare rather than
+# reading one average as the whole story. `end <= start` crosses midnight.
+service_window = ["06:00", "09:00"]
+max_wait_min = 30.0              # cap on the modelled wait min(headway/2, max_wait)
+board_penalty_min = 1.0
+transfer_penalty_min = 2.0
+max_transfer_distance_m = 400.0
+max_access_distance_m = 800.0
+# Route types whose rides run ON the street and are map-matched onto street
+# segments (tram 0, bus 3, trolleybus 11) — so a bus rider deposits mass on the
+# avenue. Metro/rail keep their own `rail_line` layer: a passenger in a tunnel is
+# co-present with nobody above.
+surface_route_types = [0, 3, 11]
+map_match_surface_rides = true
+
+# --- Routing ------------------------------------------------------------------
+[routing]
+engine = "pandana"               # fast, city-scale; switch to "networkx" for tiny runs
+access_mode = "walk"             # nearest / catchment bindings are pedestrian access
+
+# --- Segregation metrics ------------------------------------------------------
+# Every registered metric runs unless switched off here, by registry name:
+# cross_mode_exposure, diversity, dominant_trajectories, experienced_segregation,
+# exposure, intergroup_contact, path_fragmentation, segregated_trajectories.
+# `disabled` is applied after `enabled` (None = all). Turning `path_fragmentation`
+# off also skips the per-path rasterisation, the costly part of aggregation.
+# [metrics]
+# disabled = ["path_fragmentation"]
+# `cross_mode.factor` is how much another mode's mass counts when measuring a
+# mode's experienced exposure. 0 reproduces `exposure` exactly; 1 pools every mode
+# as one crowd. Only the *cross* term is filtered to street segments, so rail
+# stays uncontaminated. Non-trivial only for the `od` binding with a mode-mixed
+# OD file — the access bindings all use a single `routing.access_mode`.
+[metrics.cross_mode]
+factor = 0.5
+# overrides = { "transit|walk" = 0.7 }   # per mode-pair exception, symmetric
+
+# --- POI access bindings ------------------------------------------------------
+# Both are skipped entirely by `--od-only` (no POI is even fetched), which leaves
+# the home→work OD pairs as the only binding.
+[poi.catchment]
+budget_minutes = 30.0            # 30-min walk catchment (plan default)
+weight_mode = "unit"

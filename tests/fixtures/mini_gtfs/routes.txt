@@ -1,0 +1,4 @@
+route_id,route_short_name,route_long_name,route_type
+BUS1,17,Main Street Bus,3
+BUS2,22,Crosstown Bus,3
+MET1,BSL,Broad Street Line,1

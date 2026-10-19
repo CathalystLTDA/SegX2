@@ -1,0 +1,13 @@
+route_id,service_id,trip_id,direction_id
+BUS1,WD,t0,0
+BUS1,WD,t1,0
+BUS1,WD,t2,0
+BUS1,WD,t3,0
+BUS1,WD,t4,0
+BUS1,WD,t5,0
+BUS1,SA,w1,0
+BUS2,WD,u0,0
+BUS2,WD,u1,0
+BUS2,WD,u2,0
+MET1,WD,m1,0
+MET1,WD,m2,0
