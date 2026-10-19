@@ -35,6 +35,19 @@ This was handled strictly because it is where segregation metrics silently go wr
 
 Every run returns a reachability summary per binding (how many trajectories were reachable vs. unreachable, and why), ready to display without reprocessing.
 
+> **Correction (found after P3).** The Pandana backend did not fully honour this invariant.
+> Pandana reports a disconnected pair with a cost of `4294967.295` (the uint32 maximum in its
+> internal units) and an empty path, but the engine's "unreachable" sentinel was set to `1e30`.
+> Disconnected pairs therefore came back as *reachable* routes with zero edges — 162 of them on
+> a 31,614-flow Philadelphia clip. An empty path touches no segment, so no per-segment value
+> changed, but those flows were booked as reachable (and their mass as deposited in the
+> conservation ledger) instead of `unreachable`. The NetworkX oracle was not affected, and the
+> cross-check of §3 did not catch it. The sentinel now matches Pandana's value
+> ([`segx/routing/pandana_engine.py`](../segx/routing/pandana_engine.py)), and a regression
+> test routes a pair to a disconnected node through both the batched and the per-pair calls
+> (`test_pandana_batched_shortest_paths_match_the_per_pair_call` in
+> [`tests/unit/test_routing.py`](../tests/unit/test_routing.py)).
+
 ---
 
 ## 3. How we know the routing is correct

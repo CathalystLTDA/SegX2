@@ -1,7 +1,10 @@
 # SegX — How each metric is computed
 
-**Scope of this document:** for every delivered measure (P4 + P5), the **exact formula** used,
-the **edge-case convention**, and the **code that implements it**, with links to the source.
+**Scope of this document:** for every per-segment and per-group measure (P4, P5, P7.1), the
+**exact formula** used, the **edge-case convention**, and the **code that implements it**, with
+links to the source. The path fragmentation index has its own report,
+[P7.3-path-fragmentation.md](P7.3-path-fragmentation.md), because it is measured per path
+rather than per segment.
 
 Every metric is a *plugin* (`segx/metrics/`): it reads **the same
 per-segment table** produced by aggregation (P4) and returns (a) a per-segment value and
@@ -16,25 +19,23 @@ Before any formula, we need to know **what a segment's "mass" (`mass`) is**.
 Each routed trajectory (P3) carries the demographic vector of its origin
 (`demo_vector` = agent counts per class, e.g. `{income: {low: 12, mid: 30, high: 5}}`).
 The accumulator deposits that vector **on every edge of the traversed path**, summing per
-partition `(mode, category, binding)`:
+partition `(mode, category, binding)`. The partition is the trajectory's, except for a public
+transport trip (P7.2): its ride legs are deposited under `transit` and its walking legs under
+`walk`, so "bus passenger" does not also count the same person on the sidewalk.
 
-[`segx/aggregation/edge_accumulator.py:134-147`](segx/aggregation/edge_accumulator.py#L134-L147)
+[`EdgeAccumulator.add` in `segx/aggregation/edge_accumulator.py`](../segx/aggregation/edge_accumulator.py)
+(simplified — the real loop also keeps the conservation ledger and the path counts):
 
 ```python
-partition = trajectory.partition
-edges = self._acc.setdefault(partition, {})
-for edge in trajectory.path:
-    ce = canonical_edge(edge)
+values = [demo_vector[name][label] for name, label in self._slots]  # one slot per (attribute, class)
+for index, ce in enumerate(canonical):  # the path's edges, direction-free
+    edges = self._acc.setdefault(partitions[index] if partitions else partition, {})
     bucket = edges.get(ce)
     if bucket is None:
-        bucket = {name: [0.0] * len(labels) for name, labels in self._attrs}
-        edges[ce] = bucket
-    for name, labels in self._attrs:
-        vec = demo_vector[name]
-        arr = bucket[name]
-        for i, label in enumerate(labels):
-            arr[i] += vec[label]
-    self._edge_mass_total += mass
+        edges[ce] = [0.0 + x for x in values]
+    else:
+        for i in slots:
+            bucket[i] += values[i]
 ```
 
 Formally, for segment *s*, class *i* of a demographic attribute, and the set *T(s)* of
@@ -46,7 +47,7 @@ where `v_i(t)` is the agent count of class *i* at the trajectory's origin and `w
 **route-choice weight** (`route_weight`, P4.5 — equal to `1` when there is a single route;
 with *k* alternative routes, `Σ wᵢ = 1`, so the flow is **split**, not duplicated):
 
-[`segx/orchestrator.py:426-442`](segx/orchestrator.py#L426-L442)
+[`_demo_vector_for` in `segx/orchestrator.py`](../segx/orchestrator.py)
 
 ```python
 if trajectory.route_weight != 1.0:
@@ -56,7 +57,7 @@ return vector
 
 The result is a long table (`to_frame()`), one row per
 `(mode, category, binding, u, v, key, attribute, class)` with columns `mass` and `n_paths`:
-[`segx/aggregation/edge_accumulator.py:161-197`](segx/aggregation/edge_accumulator.py#L161-L197).
+[`segx/aggregation/edge_accumulator.py`](../segx/aggregation/edge_accumulator.py).
 
 **Notation used from here on:**
 
@@ -86,7 +87,7 @@ $$H \;=\; -\sum_i p_i \log_2 p_i \qquad p_i = \frac{P_i}{P_t}$$
 Measures the **mixing** of the segment, in *bits*, independent of how many people pass.
 `H = 0` → a single class. `H = log₂ n` → all classes equally present.
 
-[`segx/metrics/entropy.py:53-73`](segx/metrics/entropy.py#L53-L73)
+[`segx/metrics/entropy.py`](../segx/metrics/entropy.py)
 
 ```python
 def shannon_entropy(counts: Iterable[float], base: float = 2.0) -> float:
@@ -113,7 +114,7 @@ $$h \;=\; \frac{H}{\log_2 n} \;\in\; [0, 1]$$
 The same entropy rescaled to 0–1 by dividing by the maximum possible — which makes segments
 and cities **comparable** to one another.
 
-[`segx/metrics/entropy.py:76-88`](segx/metrics/entropy.py#L76-L88)
+[`segx/metrics/entropy.py`](../segx/metrics/entropy.py)
 
 ```python
 def normalized_entropy(counts: Iterable[float], n_classes: int, base: float = 2.0) -> float:
@@ -129,7 +130,7 @@ def normalized_entropy(counts: Iterable[float], n_classes: int, base: float = 2.
 
 $$G \;=\; 1 - \sum_i p_i^{2}$$
 
-[`segx/metrics/entropy.py:114-134`](segx/metrics/entropy.py#L114-L134)
+[`segx/metrics/entropy.py`](../segx/metrics/entropy.py)
 
 ```python
 def gini_simpson(counts: Iterable[float]) -> float:
@@ -163,7 +164,7 @@ i.e. **entropy weighted by the segment's agent volume** — busy *and* mixed str
 higher; an alley with 3 people from 3 different groups does not tie with an avenue carrying
 3,000.
 
-[`segx/metrics/entropy.py:91-111`](segx/metrics/entropy.py#L91-L111)
+[`segx/metrics/entropy.py`](../segx/metrics/entropy.py)
 
 ```python
 def segment_diversity(counts: Iterable[float], base: float = 2.0) -> float:
@@ -183,15 +184,16 @@ def segment_diversity(counts: Iterable[float], base: float = 2.0) -> float:
 
 Applied to the table (one value per segment, per attribute, per partition):
 
-[`segx/metrics/entropy.py:155-165`](segx/metrics/entropy.py#L155-L165)
+[`ShannonEntropyMetric.compute` in `segx/metrics/entropy.py`](../segx/metrics/entropy.py)
 
 ```python
-rows = (
-    edge_table.groupby(list(self.GROUP_KEYS), sort=False)["mass"]
-    .apply(lambda s: segment_diversity(s.to_numpy()))
-    .reset_index(name=self.name)
-)
+return per_segment_values(edge_table, self.GROUP_KEYS, "mass", segment_diversity, self.name)
 ```
+
+`per_segment_values` ([`segx/metrics/_segments.py`](../segx/metrics/_segments.py)) applies a
+function to each segment's class-mass array; it returns exactly what
+`edge_table.groupby(keys, sort=False)["mass"].apply(lambda s: fn(s.to_numpy()))` would,
+without building a pandas object per group.
 
 > **Alternative:** the normalized `h` (comparable across segments) instead of `D` (the paper's
 > formula, sensitive to volume). Swapping is a one-line change; nothing in routing/aggregation
@@ -212,7 +214,7 @@ $$S(s) \;=\; 1 - h(s)$$
 
 **Network indicator:** mean over segments (skipping `NaN`).
 
-[`segx/metrics/entropy.py:191-208`](segx/metrics/entropy.py#L191-L208)
+[`segx/metrics/entropy.py`](../segx/metrics/entropy.py)
 
 ```python
 class ExperiencedSegregationMetric(Metric):
@@ -229,14 +231,10 @@ class ExperiencedSegregationMetric(Metric):
 The per-segment grouping is the shared helper — since `to_frame()` emits **one row per
 possible class** (zeros included), `len(group)` already is the number of classes `n`:
 
-[`segx/metrics/entropy.py:174-188`](segx/metrics/entropy.py#L174-L188)
+[`_per_segment` in `segx/metrics/entropy.py`](../segx/metrics/entropy.py)
 
 ```python
-return (
-    edge_table.groupby(list(_SEGMENT_KEYS), sort=False)["mass"]
-    .apply(lambda s: fn(s.to_numpy()))
-    .reset_index(name=value_name)
-)
+return per_segment_values(edge_table, _SEGMENT_KEYS, "mass", fn, value_name)
 ```
 
 ---
@@ -253,7 +251,7 @@ Distinct from entropy: entropy measures *diversity*; this measures *contact like
 
 **Network indicator:** mean over segments.
 
-[`segx/metrics/entropy.py:211-223`](segx/metrics/entropy.py#L211-L223)
+[`segx/metrics/entropy.py`](../segx/metrics/entropy.py)
 
 ```python
 class IntergroupContactMetric(Metric):
@@ -284,15 +282,11 @@ A group that traverses no segment (or only segments with undefined `H`) → `NaN
 
 **Network indicator:** mean exposure across groups.
 
-[`segx/metrics/exposure.py:47-66`](segx/metrics/exposure.py#L47-L66)
+[`segx/metrics/exposure.py`](../segx/metrics/exposure.py)
 
 ```python
 # per-segment composition entropy H (bits), one value per segment
-seg_h = (
-    edge_table.groupby(list(_SEGMENT_KEYS), sort=False)["mass"]
-    .apply(lambda s: shannon_entropy(s.to_numpy()))
-    .reset_index(name="_H")
-)
+seg_h = per_segment_values(edge_table, _SEGMENT_KEYS, "mass", shannon_entropy, "_H")
 merged = edge_table.merge(seg_h, on=list(_SEGMENT_KEYS), how="left")
 
 records: list[dict] = []
@@ -330,8 +324,16 @@ identical to `exposure`, so the two are read side by side.
 **Parameters** (`metrics.cross_mode`): `factor` (default **0.5**) and per-pair `overrides`
 keyed `"mode_a|mode_b"`, stored with the two modes sorted — the factor is **symmetric**.
 
-**Two rules that make it well-defined:**
+**Three rules that make it well-defined:**
 
+- **Modes meet on a shared street corridor, not on a shared edge id** (P7.2). The `walk` and
+  `drive` graphs are separate OSM extracts, and where sidewalks are mapped as their own ways the
+  pedestrian and the car are on *different* edges of the same street. Every edge of every mode
+  graph is assigned to a **corridor** (the roadway block) by midpoint proximity plus a bearing
+  test (`tolerance_m`, default 20 m; `max_bearing_deg`, default 30°); the pool is the corridor.
+  Within a pool, each mode contributes the **length-weighted mean** of its edges' mass, so a
+  sidewalk split into three OSM edges does not triple the pedestrian term. With one edge per
+  mode per pool this reduces to the plain edge join.
 - Pooling runs across `mode` **only**, within `(category, binding, attribute)`. The reason is
   dimensional: a catchment trajectory under `weight_mode="unit"` deposits its origin's whole
   vector once *per reachable POI*, so its mass is inflated by a POI count; adding it to a
@@ -341,13 +343,19 @@ keyed `"mode_a|mode_b"`, stored with the two modes sorted — the factor is **sy
   avenue above. Consequently `factor = 0` reproduces `exposure` **row for row**, and
   `factor = 1` is total pooling (`H_cross` identical across observer modes).
 
-[`segx/metrics/cross_mode_exposure.py`](segx/metrics/cross_mode_exposure.py)
+[`CrossModeExposureMetric.compute` in `segx/metrics/cross_mode_exposure.py`](../segx/metrics/cross_mode_exposure.py)
 
 ```python
-for mode in pd.unique(df["mode"]):                       # at most 3 modes
-    weights = df["mode"].map(lambda other, m=mode: cfg.factor_for(m, other))
-    pooled = (mass * weights).where(street, 0.0).groupby(pool_by, sort=False).transform("sum")
-    effective = pooled.where(street, mass)               # non-street rows keep their own mass
+repr_by_mode = self._pooled_representatives(df, mass, street, pool_keys)  # per pool, per mode
+for mode in pd.unique(df["mode"]):
+    cross = pd.Series(0.0, index=df.index)
+    for other in repr_by_mode.columns:
+        if other == mode:
+            continue
+        factor = cfg.factor_for(mode, other)
+        if factor:
+            cross = cross + factor * repr_by_mode[other]
+    effective = mass + cross.where(street, 0.0)  # non-street rows keep their own mass
 ```
 
 **Worked example** — one street segment, attribute `income ∈ {low, high}`, `f = 0.5`:
@@ -371,13 +379,15 @@ Plain `exposure` would give walk `H(3, 1) = 0.8113`.
    `nearest`/`catchment` contribute one mode and the metric reduces identically to `exposure`
    there. It is non-trivial **only for `binding="od"`**, and only when the OD file mixes modes.
 
-> **Coverage caveat.** Two modes only mix where they deposit on the same `(u, v, key)`.
-> `network.simplify` runs independently per extract, so the `walk` and `drive` id spaces can
-> diverge in a real city and the join can find nothing — which shows up not as a zero but as
-> `cross_mode_exposure == exposure`. `AggregationResult.stats["cross_mode"]` reports
-> `n_modes_present`, `n_segments_total`, `n_segments_multimode`, `cross_mode_join_rate` and
-> `n_surface_rides_unmatched`; the metric emits a `UserWarning` when several modes are present
-> and the join rate is 0. **Read that number before interpreting this metric.**
+> **Coverage caveat.** Two modes only mix where they land in the same corridor. When they do
+> not, the failure shows up not as a zero but as `cross_mode_exposure == exposure`, which reads
+> as the finding "the modes never meet". The run's `stats["cross_mode"]` reports the corridor
+> match rate (`street_space`), `n_segments_total`, `n_segments_multimode`, and — the number to
+> read — **`pair_join_rates`**, one entry per mode pair. The global `cross_mode_join_rate` is
+> not enough on its own: it can be high while one pair (say `drive|walk`) never meets. The
+> metric emits a `UserWarning` naming **every pair** that never shares a pool.
+> `cross_mode_combination_counts` breaks the segments down by exact mode set (`walk`,
+> `drive+walk`, …). **Read these before interpreting this metric.**
 
 ---
 
@@ -400,13 +410,11 @@ A segment with no mass → `dominant_class = None` and `dominance = NaN` (never 
 
 **Network indicator:** mean dominance across segments (`value_column = "dominance"`).
 
-[`segx/metrics/dominant_trajectories.py:47-64`](segx/metrics/dominant_trajectories.py#L47-L64)
+[`segx/metrics/dominant_trajectories.py`](../segx/metrics/dominant_trajectories.py)
 
 ```python
-records: list[dict] = []
-for keys, sub in edge_table.groupby(list(_SEGMENT_KEYS), sort=False):
-    masses = sub["mass"].to_numpy(dtype=float)
-    classes = sub["class"].to_numpy()
+groups = segment_groups(edge_table, _SEGMENT_KEYS)
+for masses, classes in groups.arrays("mass", "class"):
     total = math.fsum(masses)
     if total <= 0.0:
         dominant, dominance = None, math.nan
@@ -414,13 +422,8 @@ for keys, sub in edge_table.groupby(list(_SEGMENT_KEYS), sort=False):
         winner = int(masses.argmax())
         dominant = str(classes[winner])
         dominance = 1.0 - normalized_entropy(masses, n_classes=len(masses))
-    records.append(
-        {
-            **dict(zip(_SEGMENT_KEYS, keys, strict=True)),
-            "dominant_class": dominant,
-            self.value_column: dominance,
-        }
-    )
+    dominants.append(dominant)
+    dominances.append(dominance)
 ```
 
 > Note that `dominance` and `experienced_segregation` (§3) use **the same expression `1 − h`**:
@@ -447,11 +450,11 @@ A segment is flagged **`exclusive`** when its **dominant group**'s `LQ` reaches 
 
 $$\text{exclusive}(s) \;=\; \big[\, LQ_{\text{dominant}}(s) \;\ge\; \tau \,\big], \qquad \tau = \texttt{metrics.exclusive\_lq\_threshold} \;(\text{default } 2.0)$$
 
-The threshold is configurable ([`segx/config.py:382-383`](segx/config.py#L382-L383)) and is
+The threshold is configurable ([`segx/config.py`](../segx/config.py)) and is
 a parameter that directly affects the results. A segment with no mass, or a group
 absent from the whole partition (`0/0`), → `LQ = NaN` and `exclusive = False`.
 
-[`segx/metrics/segregated_trajectories.py:53-75`](segx/metrics/segregated_trajectories.py#L53-L75)
+[`segx/metrics/segregated_trajectories.py`](../segx/metrics/segregated_trajectories.py)
 
 ```python
 threshold = settings.metrics.exclusive_lq_threshold
@@ -466,16 +469,15 @@ seg_total = df.groupby(list(_SEGMENT_KEYS), sort=False)["mass"].transform("sum")
 seg_p = df["mass"] / seg_total
 df = df.assign(_lq=(seg_p / global_p))
 
-records: list[dict] = []
-for keys, sub in df.groupby(list(_SEGMENT_KEYS), sort=False):
-    masses = sub["mass"].to_numpy(dtype=float)
+groups = segment_groups(df, _SEGMENT_KEYS)
+for masses, classes, seg_lq in groups.arrays("mass", "class", "_lq"):
     total = math.fsum(masses)
     if total <= 0.0:
         dominant, lq, exclusive = None, math.nan, False
     else:
         winner = int(masses.argmax())
-        dominant = str(sub["class"].to_numpy()[winner])
-        lq = float(sub["_lq"].to_numpy()[winner])
+        dominant = str(classes[winner])
+        lq = float(seg_lq[winner])
         exclusive = bool(lq >= threshold) if not math.isnan(lq) else False
 ```
 
@@ -484,7 +486,7 @@ exclusive segments per dominant group** —
 
 $$\text{share\_exclusive}(g) \;=\; \frac{\#\{s : \text{dominant}(s) = g \ \wedge\ \text{exclusive}(s)\}}{\#\{s : \text{dominant}(s) = g\}}$$
 
-[`segx/metrics/segregated_trajectories.py:86-97`](segx/metrics/segregated_trajectories.py#L86-L97)
+[`segx/metrics/segregated_trajectories.py`](../segx/metrics/segregated_trajectories.py)
 
 ```python
 keys = ["mode", "category", "binding", "attribute", "dominant_class"]
@@ -502,7 +504,7 @@ simply drop out of the count, instead of dragging the mean down as if they were 
 
 $$\overline{M} \;=\; \frac{1}{|S^{*}|}\sum_{s \in S^{*}} M(s), \qquad S^{*} = \{s : M(s) \neq \text{NaN}\}$$
 
-[`segx/metrics/base.py:42-57`](segx/metrics/base.py#L42-L57)
+[`segx/metrics/base.py`](../segx/metrics/base.py)
 
 ```python
 def summarize(self, per_segment, settings: Settings):
@@ -513,19 +515,20 @@ def summarize(self, per_segment, settings: Settings):
     return per_segment.groupby(keys, sort=False)[col].mean().reset_index()
 ```
 
-And the orchestrator runs **every registered metric** (or the subset in
-`settings.metrics.enabled`) over the same table, storing each one's map + summary:
+And the orchestrator runs **every active metric** — all registered metrics, narrowed by
+`metrics.enabled` and then `metrics.disabled` — over the same table, storing each one's map +
+summary. A metric that declares extra inputs in `requires` (only `path_fragmentation`, which
+needs the per-path table) receives them; every other metric gets the edge table alone:
 
-[`segx/orchestrator.py:471-479`](segx/orchestrator.py#L471-L479)
+[`aggregate` in `segx/orchestrator.py`](../segx/orchestrator.py)
 
 ```python
-metric_names = settings.metrics.enabled if settings.metrics.enabled is not None else available_metrics()
-_stage("compute_metrics", ", ".join(metric_names))
-metrics: dict[str, pd.DataFrame] = {}
-summaries: dict[str, pd.DataFrame] = {}
+metric_names = settings.metrics.active(available_metrics())
+...
 for name in metric_names:
     metric = get_metric(name)()
-    per_segment = metric.compute(edge_table, settings)
+    extras = {key: extra_frames[key] for key in metric.requires}
+    per_segment = metric.compute(edge_table, settings, **extras)
     metrics[name] = per_segment
     summaries[name] = metric.summarize(per_segment, settings)
 ```
@@ -569,12 +572,12 @@ Every measure has a test with a hand-computed value (the synthetic city in
 
 | Metric | Implementation | Test |
 |---|---|---|
-| `shannon_entropy`, `normalized_entropy`, `segment_diversity`, `gini_simpson` | [segx/metrics/entropy.py](segx/metrics/entropy.py) | [tests/unit/test_entropy.py](tests/unit/test_entropy.py) |
-| `diversity` | [segx/metrics/entropy.py](segx/metrics/entropy.py) | [tests/unit/test_entropy.py](tests/unit/test_entropy.py), [tests/unit/test_aggregation.py](tests/unit/test_aggregation.py) |
-| `experienced_segregation`, `intergroup_contact` | [segx/metrics/entropy.py](segx/metrics/entropy.py) | [tests/unit/test_refining.py](tests/unit/test_refining.py) |
-| `exposure` | [segx/metrics/exposure.py](segx/metrics/exposure.py) | [tests/unit/test_exposure.py](tests/unit/test_exposure.py) |
-| `dominant_trajectories` | [segx/metrics/dominant_trajectories.py](segx/metrics/dominant_trajectories.py) | [tests/unit/test_dominant.py](tests/unit/test_dominant.py) |
-| `segregated_trajectories` | [segx/metrics/segregated_trajectories.py](segx/metrics/segregated_trajectories.py) | [tests/unit/test_segregated.py](tests/unit/test_segregated.py) |
-| aggregated-mass conservation | [segx/aggregation/edge_accumulator.py](segx/aggregation/edge_accumulator.py) | [tests/integration/test_pipeline_synthetic.py](tests/integration/test_pipeline_synthetic.py) |
+| `shannon_entropy`, `normalized_entropy`, `segment_diversity`, `gini_simpson` | [segx/metrics/entropy.py](../segx/metrics/entropy.py) | [tests/unit/test_entropy.py](../tests/unit/test_entropy.py) |
+| `diversity` | [segx/metrics/entropy.py](../segx/metrics/entropy.py) | [tests/unit/test_entropy.py](../tests/unit/test_entropy.py), [tests/unit/test_aggregation.py](../tests/unit/test_aggregation.py) |
+| `experienced_segregation`, `intergroup_contact` | [segx/metrics/entropy.py](../segx/metrics/entropy.py) | [tests/unit/test_refining.py](../tests/unit/test_refining.py) |
+| `exposure` | [segx/metrics/exposure.py](../segx/metrics/exposure.py) | [tests/unit/test_exposure.py](../tests/unit/test_exposure.py) |
+| `dominant_trajectories` | [segx/metrics/dominant_trajectories.py](../segx/metrics/dominant_trajectories.py) | [tests/unit/test_dominant.py](../tests/unit/test_dominant.py) |
+| `segregated_trajectories` | [segx/metrics/segregated_trajectories.py](../segx/metrics/segregated_trajectories.py) | [tests/unit/test_segregated.py](../tests/unit/test_segregated.py) |
+| aggregated-mass conservation | [segx/aggregation/edge_accumulator.py](../segx/aggregation/edge_accumulator.py) | [tests/integration/test_pipeline_synthetic.py](../tests/integration/test_pipeline_synthetic.py) |
 
 Reproduce: `uv run pytest -q`.

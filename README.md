@@ -85,7 +85,7 @@ Each metric is a plugin (`segx/metrics/`). Any of them can be switched off with
 | `cross_mode_exposure` | group | the same, also counting other modes on the same street |
 | `path_fragmentation` | group | fractal dimension of trajectories (box counting), plus detour and length |
 
-Formulas and a hand-checked example: [`reports/MetricFormulas.md`](reports/MetricFormulas.md).
+Formulas and a hand-checked example: [`reports/metric-formulas.md`](reports/metric-formulas.md).
 
 ## Invariants
 

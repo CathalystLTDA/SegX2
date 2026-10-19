@@ -1,11 +1,11 @@
 # SegX — Output writers (P8): the run's output files
 
-**Status:** **implemented and tested** on the synthetic validation city (434 tests passing,
+**Status:** **implemented and tested** on the synthetic validation city (all tests passing,
 lint clean). **Not yet run** on the Philadelphia clip with the writers enabled — see §6.
-**Related documents:** [MetricFormulas.md](MetricFormulas.md) (what each metric computes),
-[P8PathFragmentation.md](P8PathFragmentation.md) and
-[P9ODDestinationSpread.md](P9ODDestinationSpread.md) (the two most recent measures, which are
-also written to these files).
+**Related documents:** [metric-formulas.md](metric-formulas.md) (what each metric computes),
+[P7.3-path-fragmentation.md](P7.3-path-fragmentation.md) and
+[P7.5-od-destination-spread.md](P7.5-od-destination-spread.md) (two measures that are not
+per segment, also written to these files).
 
 ---
 
@@ -92,7 +92,7 @@ segment. They therefore are not map columns: they are in the spreadsheet (§4).
 | `columns` | the GeoPackage column dictionary |
 | `diversity`, `experienced_segregation`, `intergroup_contact`, `dominant_trajectories`, `segregated_trajectories` | each per-segment metric's network indicator, per mode |
 | `exposure`, `cross_mode_exposure`, `path_fragmentation` | the per-group table, and next to it (`*_summary`) the summary |
-| `od_spread_summary`, `od_spread_overlap` | destinations per class and overlap between classes (see P9ODDestinationSpread.md) |
+| `od_spread_summary`, `od_spread_overlap` | destinations per class and overlap between classes (see [P7.5-od-destination-spread.md](P7.5-od-destination-spread.md)) |
 | `audit_conservation` | people emitted = deposited + unrouted; the balance must be 0 |
 | `audit_counts`, `audit_partitions` | how many segments and trajectories, in which combinations |
 | `audit_reachability` | how many origins/flows got no route, and why; points too far from the network |

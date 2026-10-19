@@ -1,8 +1,23 @@
-# SegX Project Report — Phase 0 & 1 Complete
+# SegX — P0–P1: foundations
 
 **Project:** SegX (Segregação Espacial Dinâmica)  
 **Status:** Phase 0 (skeleton) + Phase 1 (network & IO) completed  
 **Date:** May 2026
+
+> **Historical record.** This report describes the engine as it stood at the end of P1, when
+> routing, aggregation and metrics were still skeletons. Later phases changed some of what is
+> written here:
+>
+> - **Pandana is a core dependency**, installed by a plain `uv sync` (since P3). The `routing`
+>   extra mentioned below no longer exists. See [P3-routing.md](P3-routing.md).
+> - **The aggregator deposits the demographic vector itself**, not `weight × demo_vector`
+>   (decision 4 below). See [P4-aggregation-diversity.md](P4-aggregation-diversity.md).
+> - **Weight conservation is an exact equality**, `emitted = deposited + unreachable`, not an
+>   inequality. See [P4-aggregation-diversity.md](P4-aggregation-diversity.md).
+> - The output writers (`segments.gpkg` + `metrics.xlsx`) arrived in P8, not P4. See
+>   [P8-output-writers.md](P8-output-writers.md).
+>
+> For the current state, start from the repository [README](../README.md).
 
 ---
 
@@ -108,7 +123,7 @@ This captures segregation as a **dynamic, movement-based phenomenon**, not just 
   - OSMnx (street networks), QuackOSM (POI extraction), Pandana (routing)
   - GeoPandas, DuckDB, GeoParquet for data handling
   - Pydantic (configuration), Typer (CLI), pytest (testing)
-  - Optional extra: `uv sync --extra routing` for Pandana (prebuilt wheel on Python 3.11, incl. Windows; pins numpy<2)
+  - Pandana: then an optional extra; a core dependency since P3 (prebuilt wheel on Python 3.11, incl. Windows; pins numpy<2)
 
 - **`segx/config.py`** — Layered `Settings` object:
   - Built-in defaults (usable end-to-end from CLI with zero configuration)
@@ -253,7 +268,7 @@ This test runs in CI and gates P2–P5 work. If routing or aggregation code chan
 
 Running in every `run` command:
 
-1. **Conservation:** Σ(origin weights entering network) ≥ Σ(weights exiting at POIs) — missing weight is logged as unreachable
+1. **Conservation:** every unit of mass emitted is either deposited or booked as unreachable — `emitted = deposited + unreachable` (made exact in P4)
 2. **Entropy bounds:** Entropy ≥ 0, Entropy ≤ log₂(# bins) on every edge
 3. **Demographics propagation:** Total demographic mass entering = total aggregated per-edge
 4. **Unreachable tracking:** Any origin with no reachable POI is flagged with reason code
@@ -294,7 +309,7 @@ All emit `Trajectory(origin, destination, path, category, binding, mode, weight)
 **Implementation status (P3 ready):** Skeletons exist; Pandana and NetworkX engine wiring awaits P3.
 
 ### 4. Streaming Aggregation, Partitioned by (mode, category, binding)
-**Decision:** As each path is routed, immediately accumulate its demographic vector into `edge_vectors[(mode, category, binding)] += weight × demo_vector`. Do *not* store full trajectory lists in memory.
+**Decision:** As each path is routed, immediately accumulate its demographic vector into `edge_vectors[(mode, category, binding)] += weight × demo_vector`. Do *not* store full trajectory lists in memory. *(Superseded in P4: the deposit is the `demo_vector` itself — absolute per-class counts — not multiplied by a weight.)*
 
 **Rationale:** City-scale: 10⁶ origins × ~5 trajectories each × ~20 edges per path = ~100M trajectory-edge pairs. Storing full lists is gigabytes; streaming sums are megabytes. Metrics only need aggregates; we don't need the trajectory list unless a formula specifically requires co-occurrence.
 
@@ -359,7 +374,7 @@ All emit `Trajectory(origin, destination, path, category, binding, mode, weight)
 - Synthetic city routing + aggregation + metrics
 - Real-city smoke test (single-city boundary, small demographics file, small OD sample)
 
-**Location:** `tests/integration/` (skipped until P3–P4 ready)
+**Location:** `tests/integration/` (skipped at the time; live since P3–P4)
 
 **Fixtures:** Pre-seeded OSM caches in `tests/fixtures/` so the suite runs offline without Overpass calls.
 
@@ -384,7 +399,7 @@ All emit `Trajectory(origin, destination, path, category, binding, mode, weight)
 
 ## What Came Next
 
-Phases P2–P9 are documented in their own reports in this folder (`P2Report.md` onwards).
+Later phases are documented in their own reports in this folder — see the [index](README.md).
 
 ---
 
@@ -405,7 +420,7 @@ SegX/
 │   │   ├── demographics.py   # ✓ Load census polygons or points
 │   │   ├── pois.py           # ✓ QuackOSM POI extraction + cache
 │   │   ├── od_pairs.py       # ✓ Column-mapped OD loader
-│   │   └── writers.py        # - GeoPackage + xlsx export (P4)
+│   │   └── writers.py        # - GeoPackage + xlsx export (arrived in P8)
 │   ├── network/
 │   │   ├── builder.py        # ✓ OSMnx walk/drive graphs, travel-time weights
 │   │   ├── cache.py          # ✓ GeoParquet cache by (bbox, snapshot_date, mode)
@@ -470,11 +485,8 @@ SegX/
 
 ### Setup
 ```bash
-# Create virtual environment and install deps
+# Create virtual environment and install deps (Pandana included)
 uv sync
-
-# (Optional) Add Pandana if working on routing
-uv sync --extra routing  # prebuilt wheel on Python 3.11 (incl. Windows); needs numpy<2
 ```
 
 ### Run Tests
@@ -489,12 +501,12 @@ uv run ruff check .           # Check (line length 120)
 uv run ruff format .          # Auto-format
 ```
 
-### CLI (When P2+ ready)
+### CLI
 ```bash
 uv run segx --help
 uv run segx show-config
 
-# Example run (when P2+ implemented):
+# Example run:
 uv run segx run \
   --boundary fixtures/poa.gpkg \
   --demographics fixtures/setores.gpkg \
