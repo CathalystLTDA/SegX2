@@ -33,12 +33,14 @@ from shapely.ops import transform as shp_transform
 
 from segx.errors import GraphError, ModeNotAvailableError
 from segx.network.cache import cache_entry, cache_key, read_graph, write_graph
+from segx.network.retry import with_overpass_retries
 
 if TYPE_CHECKING:  # pragma: no cover
     from pathlib import Path
 
     from segx.config import Settings
     from segx.io.boundary import LoadedBoundary
+    from segx.progress import CancelCheck
 
 
 # --------------------------------------------------------------------------- #
@@ -50,19 +52,27 @@ def fetch_raw_graph(
     bbox_wgs84: tuple[float, float, float, float],
     network_type: str,
     settings: Settings,
+    *,
+    cancel: CancelCheck | None = None,
 ) -> nx.MultiDiGraph:
     """Fetch a raw OSMnx graph for *bbox_wgs84* in WGS84.
 
     Returned graph carries ``graph.graph['crs'] = 'EPSG:4326'`` and edges already
     have ``length`` in metres (OSMnx computes great-circle lengths on fetch).
+    Transient Overpass failures are retried with backoff (:mod:`segx.network.retry`).
     """
     import osmnx as ox
 
     minx, miny, maxx, maxy = bbox_wgs84
-    return ox.graph_from_bbox(
-        bbox=(minx, miny, maxx, maxy),
-        network_type=network_type,
-        simplify=settings.network.simplify,
+    return with_overpass_retries(
+        lambda: ox.graph_from_bbox(
+            bbox=(minx, miny, maxx, maxy),
+            network_type=network_type,
+            simplify=settings.network.simplify,
+        ),
+        what=f"the {network_type} street network",
+        settings=settings,
+        cancel=cancel,
     )
 
 
@@ -244,6 +254,8 @@ def load_or_fetch_graph(
     mode: str,
     settings: Settings,
     cache_dir: Path | None = None,
+    *,
+    cancel: CancelCheck | None = None,
 ) -> nx.MultiDiGraph:
     """Return a built, projected, weighted graph for *mode* — from cache if
     available, otherwise via :func:`fetch_raw_graph`.
@@ -260,7 +272,7 @@ def load_or_fetch_graph(
     cache_dir = cache_dir or settings.cache_dir
 
     if mode == "transit":
-        return _build_transit_mode(boundary, settings, cache_dir)
+        return _build_transit_mode(boundary, settings, cache_dir, cancel=cancel)
 
     key = cache_key(boundary.bbox_wgs84, settings.network.osm_snapshot_date, mode)
     entry = cache_entry(cache_dir, key)
@@ -276,7 +288,7 @@ def load_or_fetch_graph(
                 UserWarning,
                 stacklevel=2,
             )
-        raw = fetch_raw_graph(boundary.bbox_wgs84, mode, settings)
+        raw = fetch_raw_graph(boundary.bbox_wgs84, mode, settings, cancel=cancel)
         write_graph(
             raw,
             entry,
@@ -292,6 +304,8 @@ def _build_transit_mode(
     boundary: LoadedBoundary,
     settings: Settings,
     cache_dir: Path,
+    *,
+    cancel: CancelCheck | None = None,
 ) -> nx.MultiDiGraph:
     """Build the merged walk ⊕ transit graph for the study area (P7).
 
@@ -309,9 +323,9 @@ def _build_transit_mode(
             details={"mode": "transit", "transit_enabled": False},
         )
 
-    walk_graph = load_or_fetch_graph(boundary, "walk", settings, cache_dir)
+    walk_graph = load_or_fetch_graph(boundary, "walk", settings, cache_dir, cancel=cancel)
     drive_graph = (
-        load_or_fetch_graph(boundary, "drive", settings, cache_dir)
+        load_or_fetch_graph(boundary, "drive", settings, cache_dir, cancel=cancel)
         if settings.transit.map_match_surface_rides
         else None
     )

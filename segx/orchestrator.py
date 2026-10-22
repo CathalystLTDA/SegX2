@@ -160,10 +160,10 @@ def ingest(
     _stage("build_networks", f"modes={settings.network.modes}")
     graphs = GraphRegistry()
     for mode in settings.network.modes:
-        graphs.register(mode, load_or_fetch_graph(boundary, mode, settings, cache_dir))
+        graphs.register(mode, load_or_fetch_graph(boundary, mode, settings, cache_dir, cancel=cancel))
 
     _stage("load_pois", f"fetcher={poi_fetcher}")
-    pois = load_pois(boundary, settings, cache_dir=cache_dir, fetcher=poi_fetcher)
+    pois = load_pois(boundary, settings, cache_dir=cache_dir, fetcher=poi_fetcher, cancel=cancel)
 
     od_pairs: LoadedODPairs | None = None
     if od_pairs_path is not None:

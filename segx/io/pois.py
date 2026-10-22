@@ -44,11 +44,13 @@ from typing import TYPE_CHECKING, Any
 import geopandas as gpd
 import pandas as pd
 
-from segx.errors import ConfigValueError, POIFetchError
+from segx.errors import ConfigValueError, OSMFetchError, POIFetchError
+from segx.network.retry import with_overpass_retries
 
 if TYPE_CHECKING:  # pragma: no cover
     from segx.config import Settings
     from segx.io.boundary import LoadedBoundary
+    from segx.progress import CancelCheck
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,6 +200,8 @@ def _overpass_remarks(ox):
 def fetch_pois_osmnx(
     boundary: LoadedBoundary,
     settings: Settings,
+    *,
+    cancel: CancelCheck | None = None,
 ) -> dict[str, gpd.GeoDataFrame]:
     """Live OSM POI fetch via OSMnx (Overpass) for every preset category.
 
@@ -205,6 +209,8 @@ def fetch_pois_osmnx(
     Boundary is reprojected to WGS84 for the Overpass query. A category the
     query ran for and found nothing in comes back empty; a query that *failed*
     raises :class:`~segx.errors.POIFetchError` (see the module docstring).
+    Transient server errors are first retried with backoff
+    (:mod:`segx.network.retry`) and end in :class:`~segx.errors.OSMFetchError`.
     """
     import osmnx as ox
 
@@ -215,7 +221,14 @@ def fetch_pois_osmnx(
         failure: Exception | None = None
         with _overpass_remarks(ox) as remarks:
             try:
-                out[category] = ox.features_from_polygon(wgs_boundary, tags=tags)
+                out[category] = with_overpass_retries(
+                    lambda tags=tags: ox.features_from_polygon(wgs_boundary, tags=tags),
+                    what=f"the {category!r} POIs",
+                    settings=settings,
+                    cancel=cancel,
+                )
+            except OSMFetchError:
+                raise  # the server stayed unavailable through every retry: already typed
             except Exception as exc:  # noqa: BLE001 — classified just below
                 failure = exc
         if remarks:
@@ -275,6 +288,7 @@ def load_pois(
     *,
     cache_dir: Path | None = None,
     fetcher: str = "osmnx",
+    cancel: CancelCheck | None = None,
 ) -> LoadedPOIs:
     """Cache-aware POI extraction. Reads parquet if cached, else fetches.
 
@@ -298,7 +312,7 @@ def load_pois(
         return LoadedPOIs(gdf=gdf)
 
     if fetcher == "osmnx":
-        per_category = fetch_pois_osmnx(boundary, settings)
+        per_category = fetch_pois_osmnx(boundary, settings, cancel=cancel)
     elif fetcher == "quackosm":
         per_category = fetch_pois_quackosm(boundary, settings)
     else:

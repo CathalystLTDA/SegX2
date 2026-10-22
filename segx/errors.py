@@ -176,6 +176,18 @@ class CacheMissError(CacheError, FileNotFoundError):
     code = "network.cache_miss"
 
 
+class OSMFetchError(NetworkError, RuntimeError):
+    """A live OpenStreetMap download (Overpass) kept failing with a transient error.
+
+    Raised after the configured retries (``network.fetch_retries``, exponential
+    backoff from ``network.fetch_backoff_s``) for responses such as ``502 … at
+    capacity``, ``429`` or a timeout. ``details.retryable`` is ``True``: the same
+    run is expected to succeed later, and nothing partial was cached.
+    """
+
+    code = "network.osm_fetch"
+
+
 class POIFetchError(NetworkError, RuntimeError):
     """A live POI fetch failed (timeout, rate limit, server error, bad response).
 
@@ -263,6 +275,7 @@ __all__ = [
     "ModeNotAvailableError",
     "ModeNotRegisteredError",
     "NetworkError",
+    "OSMFetchError",
     "OperationCancelled",
     "OutputColumnCollisionError",
     "OutputError",

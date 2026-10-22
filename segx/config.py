@@ -445,6 +445,12 @@ class NetworkConfig(BaseModel):
     # Snap audit: any point whose nearest network node is farther than this
     # gets flagged. Working CRS is metric, so units = m.
     snap_tolerance_m: float = 250.0
+    # Live OSM downloads (Overpass) are retried on transient failures — 429, 5xx
+    # such as "502 … server at capacity", timeouts, dropped connections — waiting
+    # fetch_backoff_s, then doubling (30 s, 60 s, 120 s by default) before giving
+    # up with a typed OSMFetchError. 0 retries = fail on the first error.
+    fetch_retries: int = Field(default=3, ge=0)
+    fetch_backoff_s: float = Field(default=30.0, ge=0)
     # P7.2: cross-mode corridor resolution. See :class:`StreetSpaceConfig`.
     street_space: StreetSpaceConfig = Field(default_factory=StreetSpaceConfig)
 
