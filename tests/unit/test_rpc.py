@@ -209,3 +209,73 @@ def test_describe_types_match_the_wire(monkeypatch):
 
     assert all(set(preset) == {"tags"} for preset in result["poi_presets"].values())
     assert set(result["network"]["transit"]) == {"sources", "note", "service_window_note"}
+
+
+# --------------------------------------------------------------------------- #
+# Columns (for the host's column mapping)                                      #
+# --------------------------------------------------------------------------- #
+
+
+def test_inspect_lists_columns_with_types_and_samples(tmp_path):
+    info = inspect_layer(_points_gpkg(tmp_path, n=10))
+
+    by_name = {c["name"]: c for c in info["columns"]}
+    assert set(by_name) == {"id", "income", "label"}  # geometry is not an attribute column
+    assert by_name["id"] == {"name": "id", "type": "number", "sample": [0, 1, 2]}  # ints stay ints
+    assert by_name["income"]["type"] == "number"
+    assert by_name["label"] == {"name": "label", "type": "text", "sample": ["p0", "p1", "p2"]}
+    # the name geopandas gives the active geometry — what od_columns.origin_geom must say
+    assert info["geometry_column"] == "geometry"
+
+
+def test_inspect_csv_columns_are_typed_like_the_od_loader_reads_them(tmp_path):
+    path = tmp_path / "lodes.csv"
+    path.write_text(
+        "hGEOID,wGEOID,SE01,label\n421010001001000,421010002002000,3,a\n421010001001001,421010002002000,,b\n",
+        encoding="utf-8",
+    )
+    info = inspect_layer(path)
+
+    by_name = {c["name"]: c for c in info["columns"]}
+    # pandas inference (as io.od_pairs reads CSV), not GDAL's all-text CSV fields
+    assert by_name["hGEOID"]["type"] == "number"
+    assert by_name["hGEOID"]["sample"] == [421010001001000, 421010001001001]
+    assert by_name["SE01"]["sample"] == [3.0, None]  # NaN never reaches the wire
+    assert by_name["label"]["type"] == "text"
+    assert info["geometry_column"] is None
+    json.dumps(info, allow_nan=False)
+
+
+# --------------------------------------------------------------------------- #
+# Input presets (IBGE / LODES)                                                 #
+# --------------------------------------------------------------------------- #
+
+
+def test_input_presets_are_strict_json_with_resolved_class_columns():
+    presets = rpc._describe()["input_presets"]
+    json.dumps(presets, allow_nan=False)  # no Infinity: the app's JSON.parse rejects it
+
+    ibge = presets["ibge"]["demographics"]
+    income = next(a for a in ibge["attributes"] if a["name"] == "income")
+    assert ibge["attribute_source"] == "demographics"
+    assert income["bins"][-1] is None  # the open upper edge
+    assert income["class_columns"] == [f"income_b{i}" for i in range(6)]  # convention, resolved
+
+    lodes = presets["lodes"]
+    assert lodes["demographics"]["attribute_source"] == "od"
+    assert lodes["demographics"]["polygon_id_column"] == "GEOID"
+    assert lodes["demographics"]["attributes"][0]["class_columns"] == ["SE01", "SE02", "SE03"]
+    assert (lodes["od_columns"]["origin_id_ref"], lodes["od_columns"]["dest_id_ref"]) == ("hGEOID", "wGEOID")
+
+
+@pytest.mark.parametrize("name", ["ibge", "lodes"])
+def test_a_preset_sent_back_as_overrides_validates(name):
+    from segx.config import Settings
+
+    preset = rpc._describe()["input_presets"][name]
+    settings = Settings.load(None, {"demographics": preset["demographics"], "od_columns": preset["od_columns"]})
+
+    assert settings.demographics.attribute_source == preset["demographics"]["attribute_source"]
+    for attr in settings.demographics.attributes:
+        if attr.bins is not None:
+            assert attr.bins[-1] == math.inf  # null read back as an open edge

@@ -4,7 +4,9 @@ Two read-only helpers behind the ``inspect_layer`` / ``get_layer_preview`` RPC
 methods, so the desktop app needs no GDAL of its own:
 
 * :func:`inspect_layer` — header facts (CRS, feature count, geometry kind,
-  WGS84 bbox, driver) from :func:`pyogrio.read_info`; no geometry is loaded.
+  WGS84 bbox, driver) from :func:`pyogrio.read_info`, plus the attribute
+  columns with their value type and a few sample values, so the app can ask
+  the user which column means what; no geometry is loaded.
 * :func:`layer_preview` — the first ``max_features`` features as lightweight
   WGS84 GeoJSON for drawing a preview map.
 
@@ -34,6 +36,12 @@ _MAX_PREVIEW_PROPERTIES = 5
 
 #: Simplification tolerance as a fraction of the layer's larger WGS84 extent.
 _SIMPLIFY_FRACTION = 1 / 2000
+
+#: Sample values reported per column, so the app can show what a column holds.
+_COLUMN_SAMPLE = 3
+
+#: CSV rows read to infer column types (pandas infers from what it reads).
+_CSV_TYPE_ROWS = 200
 
 
 def _info(path: str | Path) -> dict[str, Any]:
@@ -78,6 +86,47 @@ def _bbox_wgs84(info: dict[str, Any]) -> list[float] | None:
     return [float(v) for v in transformer.transform_bounds(*bounds)]
 
 
+def _value_type(dtype: Any) -> str:
+    """Collapse a pandas dtype to number / text / boolean / datetime / other."""
+    import pandas as pd
+
+    if pd.api.types.is_bool_dtype(dtype):
+        return "boolean"
+    if pd.api.types.is_numeric_dtype(dtype):
+        return "number"
+    if pd.api.types.is_datetime64_any_dtype(dtype):
+        return "datetime"
+    if pd.api.types.is_object_dtype(dtype) or pd.api.types.is_string_dtype(dtype):
+        return "text"
+    return "other"
+
+
+def _columns(path: str | Path, info: dict[str, Any]) -> list[dict[str, Any]]:
+    """Attribute columns with their value type and up to ``_COLUMN_SAMPLE`` sample values.
+
+    Types are read the way the loaders will read the file: a CSV goes through
+    ``pandas.read_csv`` like ``io.od_pairs`` does (GDAL's CSV driver reports every
+    field as text), anything else through pyogrio like ``geopandas.read_file``.
+    """
+    import pandas as pd
+
+    try:
+        if str(info.get("driver")) == "CSV":
+            frame = pd.read_csv(path, nrows=_CSV_TYPE_ROWS)
+        else:
+            frame = pyogrio.read_dataframe(path, max_features=_COLUMN_SAMPLE, read_geometry=False)
+    except (DataSourceError, DataLayerError, ValueError, OSError) as exc:
+        raise InputError(f"cannot read layer columns: {path}: {exc}", details={"path": str(path)}) from exc
+    return [
+        {
+            "name": str(name),
+            "type": _value_type(frame[name].dtype),
+            "sample": [_scalar(v) for v in frame[name].head(_COLUMN_SAMPLE)],
+        }
+        for name in frame.columns
+    ]
+
+
 def inspect_layer(path: str | Path) -> dict[str, Any]:
     """Header facts about one input layer, without loading its geometry."""
     info = _info(path)
@@ -88,17 +137,27 @@ def inspect_layer(path: str | Path) -> dict[str, Any]:
         "geometry_type": kind,
         "bbox": None if kind == "TABLE" else _bbox_wgs84(info),
         "driver": str(info.get("driver") or ""),
+        "columns": _columns(path, info),
+        # geopandas always exposes the active geometry as "geometry", whatever the
+        # file calls it — that is the name an OD mapping (od_columns.origin_geom)
+        # has to use.
+        "geometry_column": None if kind == "TABLE" else "geometry",
     }
 
 
 def _scalar(value: Any) -> str | float | None:
-    """JSON-safe scalar for a preview property (NaN/None → None)."""
+    """JSON-safe scalar for a preview property or column sample (NaN/None → None).
+
+    Integers stay integers so an id like a 15-digit census GEOID reads as itself.
+    """
     if value is None:
         return None
     if isinstance(value, bool):
         return float(value)
-    if isinstance(value, int | float):
-        return float(value) if math.isfinite(value) else None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
     if hasattr(value, "item"):  # numpy scalar
         return _scalar(value.item())
     return str(value)

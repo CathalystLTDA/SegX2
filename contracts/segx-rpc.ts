@@ -112,6 +112,57 @@ export interface InputLayerInfo {
   formats: string[];
 }
 
+/** One demographic attribute of a preset, with every class's source column resolved. */
+export interface PresetAttribute {
+  name: string;
+  kind: string;
+  categories: string[] | null;
+  bins: (number | null)[] | null;
+  class_labels: string[];
+  class_columns: string[];
+}
+
+/** A full ``DemographicSchema`` as JSON — sendable back as the ``demographics`` override. */
+export interface PresetDemographics {
+  attribute_source: "demographics" | "od";
+  polygon_id_column: string;
+  population_column: string;
+  attributes: PresetAttribute[];
+}
+
+/** ``ODColumnMapping`` as JSON. A column field set to null = that column / strategy is not used. */
+export interface ODColumns {
+  origin_id: string | null;
+  dest_id: string | null;
+  origin_geom: string | null;
+  origin_wkt: string | null;
+  origin_lon: string | null;
+  origin_lat: string | null;
+  origin_id_ref: string | null;
+  origin_address: string | null;
+  dest_geom: string | null;
+  dest_wkt: string | null;
+  dest_lon: string | null;
+  dest_lat: string | null;
+  dest_id_ref: string | null;
+  dest_address: string | null;
+  category: string | null;
+  mode: string | null;
+  weight: string | null;
+  dest_id_precision_m: number;
+  default_category: string;
+  default_mode_by_category: Record<string, string>;
+  fallback_mode: string;
+  default_weight: number;
+}
+
+/** A starting point for the host's column mapping (one per data family). */
+export interface InputPreset {
+  label: string;
+  demographics: PresetDemographics;
+  od_columns: ODColumns;
+}
+
 /** Payload of a ``describe`` reply — the app renders its UI from this. */
 export interface DescribeResult {
   engine: EngineInfo;
@@ -120,6 +171,7 @@ export interface DescribeResult {
   network: NetworkInfo;
   poi_presets: Record<string, PoiPreset>;
   demographics_default: DemographicsDefault;
+  input_presets: Record<string, InputPreset>;
   config_schema: Record<string, unknown>;
   input_layers: Record<string, InputLayerInfo>;
   invariants: string[];
@@ -211,6 +263,13 @@ export interface InspectLayerParams {
   path: string;
 }
 
+/** One attribute column of an input file, typed the way the loaders read it. */
+export interface ColumnInfo {
+  name: string;
+  type: "number" | "text" | "boolean" | "datetime" | "other";
+  sample: (string | number | null)[];
+}
+
 /** Header facts about one input file (no geometry loaded). */
 export interface InspectLayerResult {
   crs: string | null;
@@ -218,6 +277,8 @@ export interface InspectLayerResult {
   geometry_type: "POINT" | "LINE" | "POLYGON" | "TABLE";
   bbox: number[] | null;
   driver: string;
+  columns: ColumnInfo[];
+  geometry_column: string | null;
 }
 
 export interface LayerPreviewParams {

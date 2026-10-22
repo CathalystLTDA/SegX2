@@ -25,6 +25,7 @@ Reply / events (engine → host), all tagged with the request ``id``::
 Methods:
 
 * ``describe``      — capabilities (metrics, POI presets, demographic schema,
+                      input presets for column mapping (IBGE / LODES),
                       config JSON-schema, pipeline stages). Sync, no run needed.
 * ``run_pipeline``  — run on a worker thread, streaming ``progress``/``log``
                       events, then a terminal ``result``/``error``. Params:
@@ -55,6 +56,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import math
 import sys
 import threading
 import time
@@ -66,8 +68,9 @@ from typing import Any
 # Importing entropy registers the P4 metrics (``diversity`` etc.) so ``describe``
 # reports them as available — same registration side-effect the orchestrator uses.
 import segx.metrics.entropy  # noqa: E402,F401
-from segx.config import DEFAULT_POI_PRESETS, DemographicSchema, Settings
+from segx.config import DEFAULT_POI_PRESETS, DemographicSchema, ODColumnMapping, Settings
 from segx.errors import OperationCancelled, SegXError
+from segx.io.demographics import class_columns_for
 from segx.io.inspect import inspect_layer, layer_preview
 from segx.io.writers import build_provenance
 from segx.metrics.registry import available_metrics
@@ -155,6 +158,48 @@ def _metric_catalog() -> list[dict[str, Any]]:
     return catalog
 
 
+def _schema_json(schema: DemographicSchema) -> dict[str, Any]:
+    """A demographic schema as plain JSON, with every class's source column resolved.
+
+    ``class_columns`` is filled from :func:`class_columns_for` even where the schema
+    relies on the naming convention, so a host can match the user's columns by name
+    without knowing the convention. Infinite bin edges become ``null`` (JSON has no
+    infinity); :class:`DemographicAttribute` reads ``null`` back as an open edge.
+    """
+    return {
+        "attribute_source": schema.attribute_source,
+        "polygon_id_column": schema.polygon_id_column,
+        "population_column": schema.population_column,
+        "attributes": [
+            {
+                "name": a.name,
+                "kind": a.kind,
+                "categories": a.categories,
+                "bins": None if a.bins is None else [b if math.isfinite(b) else None for b in a.bins],
+                "class_labels": a.class_labels,
+                "class_columns": class_columns_for(a),
+            }
+            for a in schema.attributes
+        ],
+    }
+
+
+def _input_presets() -> dict[str, Any]:
+    """Starting points for the host's column-mapping screen: one per data family."""
+    return {
+        "ibge": {
+            "label": "IBGE census sectors (classes on the demographics file)",
+            "demographics": _schema_json(DemographicSchema.ibge_default()),
+            "od_columns": ODColumnMapping().model_dump(),
+        },
+        "lodes": {
+            "label": "US LODES home→work flows (classes on the OD file)",
+            "demographics": _schema_json(DemographicSchema.lodes_default()),
+            "od_columns": ODColumnMapping.lodes_default().model_dump(),
+        },
+    }
+
+
 def _describe() -> dict[str, Any]:
     """Everything the app needs to render its UI from the engine, not hardcode it."""
     default_schema = DemographicSchema.ibge_default()
@@ -196,6 +241,7 @@ def _describe() -> dict[str, Any]:
                 {"name": a.name, "kind": a.kind, "class_labels": a.class_labels} for a in default_schema.attributes
             ],
         },
+        "input_presets": _input_presets(),
         "config_schema": Settings.model_json_schema(),
         "input_layers": {
             "boundary": {"required": True, "formats": ["gpkg", "shp", "geojson"]},

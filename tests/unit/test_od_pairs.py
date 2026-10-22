@@ -173,3 +173,51 @@ def test_load_od_pairs_empty_file(tmp_path) -> None:
     pd.DataFrame({"origin_lon": [], "origin_lat": [], "dest_lon": [], "dest_lat": []}).to_csv(f, index=False)
     with pytest.raises(ValueError, match="empty"):
         load_od_pairs(f, Settings(), working_crs="EPSG:32722")
+
+
+def test_none_skips_a_strategy_even_if_its_default_column_exists(tmp_path) -> None:
+    # The file has BOTH a WKT column (default name, would win) and lon/lat columns.
+    # A host mapping that chose lon/lat sets the WKT field to None, so lon/lat is used.
+    f = tmp_path / "both.csv"
+    _write_csv(
+        f,
+        origin_wkt=["POINT (-51.30 -30.10)"],
+        origin_lon=[-51.20],
+        origin_lat=[-30.00],
+        dest_lon=[-51.10],
+        dest_lat=[-30.05],
+    )
+    by_default = load_od_pairs(f, Settings(), working_crs="EPSG:4326")
+    assert by_default.gdf.geometry.x.iloc[0] == pytest.approx(-51.30)  # WKT wins by default
+
+    settings = Settings(od_columns=ODColumnMapping(origin_wkt=None, dest_wkt=None))
+    explicit = load_od_pairs(f, settings, working_crs="EPSG:4326")
+    assert explicit.gdf.geometry.x.iloc[0] == pytest.approx(-51.20)
+
+
+def test_none_optional_columns_fall_back_to_defaults(tmp_path) -> None:
+    f = tmp_path / "od.csv"
+    _write_csv(
+        f,
+        origin_lon=[-51.20],
+        origin_lat=[-30.00],
+        dest_lon=[-51.10],
+        dest_lat=[-30.05],
+        weight=[7.0],
+        mode=["walk"],
+    )
+    settings = Settings(od_columns=ODColumnMapping(weight=None, mode=None, default_weight=1.0))
+    g = load_od_pairs(f, settings, working_crs="EPSG:32722").gdf
+    assert list(g["weight"]) == [1.0]  # the "weight" column is ignored
+    assert list(g["mode"]) == ["car"]  # default_mode_by_category, not the "mode" column
+
+
+def test_unresolvable_endpoint_lists_only_the_mapped_columns(tmp_path) -> None:
+    f = tmp_path / "od.csv"
+    _write_csv(f, a=[1], b=[2])
+    settings = Settings(
+        od_columns=ODColumnMapping(origin_geom=None, origin_wkt=None, origin_id_ref=None, origin_address=None)
+    )
+    with pytest.raises(ValueError, match="could not resolve origin") as exc:
+        load_od_pairs(f, settings, working_crs="EPSG:32722")
+    assert exc.value.details["tried"] == ["origin_lon", "origin_lat"]

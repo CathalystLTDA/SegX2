@@ -61,7 +61,9 @@ class LoadedODPairs:
     gdf: gpd.GeoDataFrame
 
 
-def _endpoint_columns(mapping: ODColumnMapping, side: Side) -> tuple[str, str, str, str, str, str]:
+def _endpoint_columns(
+    mapping: ODColumnMapping, side: Side
+) -> tuple[str | None, str | None, str | None, str | None, str | None, str | None]:
     if side == "origin":
         return (
             mapping.origin_geom,
@@ -141,11 +143,12 @@ def _resolve_endpoint(
             f"deferred to a later phase. Provide {wkt_col!r} or {lon_col!r}+{lat_col!r} "
             "in the OD file for now."
         )
+    # Only the strategies the mapping actually uses (None = "not used").
+    tried = [c for c in (geom_col, wkt_col, lon_col, lat_col, id_ref_col, addr_col) if c is not None]
     raise SchemaError(
-        f"could not resolve {side} location in the OD file: none of "
-        f"[{geom_col!r}, {wkt_col!r}, ({lon_col!r}, {lat_col!r}), {id_ref_col!r}, {addr_col!r}] "
-        f"are present. Available columns: {sorted(cols)}",
-        details={"side": side, "available": sorted(map(str, cols))},
+        f"could not resolve {side} location in the OD file: none of the mapped columns "
+        f"{tried} are present. Available columns: {sorted(map(str, cols))}",
+        details={"side": side, "tried": tried, "available": sorted(map(str, cols))},
     )
 
 

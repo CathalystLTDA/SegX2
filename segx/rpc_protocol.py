@@ -157,6 +157,61 @@ class InputLayerInfo(TypedDict):
     formats: list[str]
 
 
+class PresetAttribute(TypedDict):
+    """One demographic attribute of a preset, with every class's source column resolved."""
+
+    name: str
+    kind: str  # "categorical" | "binned" | "numeric"
+    categories: list[str] | None
+    bins: list[float | None] | None  # null first/last edge = open range (JSON has no infinity)
+    class_labels: list[str]
+    class_columns: list[str]  # one per class, in class order
+
+
+class PresetDemographics(TypedDict):
+    """A full ``DemographicSchema`` as JSON — sendable back as the ``demographics`` override."""
+
+    attribute_source: Literal["demographics", "od"]
+    polygon_id_column: str
+    population_column: str
+    attributes: list[PresetAttribute]
+
+
+class ODColumns(TypedDict):
+    """``ODColumnMapping`` as JSON. A column field set to null = that column / strategy is not used."""
+
+    origin_id: str | None
+    dest_id: str | None
+    origin_geom: str | None
+    origin_wkt: str | None
+    origin_lon: str | None
+    origin_lat: str | None
+    origin_id_ref: str | None
+    origin_address: str | None
+    dest_geom: str | None
+    dest_wkt: str | None
+    dest_lon: str | None
+    dest_lat: str | None
+    dest_id_ref: str | None
+    dest_address: str | None
+    category: str | None
+    mode: str | None
+    weight: str | None
+    dest_id_precision_m: float
+    default_category: str
+    default_mode_by_category: dict[str, str]
+    fallback_mode: str
+    default_weight: float
+
+
+class InputPreset(TypedDict):
+    """A starting point for the host's column mapping (one per data family)."""
+
+    label: str
+    demographics: PresetDemographics
+    od_columns: ODColumns
+
+
 class DescribeResult(TypedDict):
     """Payload of a ``describe`` reply — the app renders its UI from this."""
 
@@ -166,6 +221,7 @@ class DescribeResult(TypedDict):
     network: NetworkInfo
     poi_presets: dict[str, PoiPreset]
     demographics_default: DemographicsDefault
+    input_presets: dict[str, InputPreset]  # "ibge", "lodes"
     config_schema: dict[str, Any]  # Settings.model_json_schema()
     input_layers: dict[str, InputLayerInfo]
     invariants: list[str]
@@ -276,6 +332,14 @@ class InspectLayerParams(TypedDict):
     path: str
 
 
+class ColumnInfo(TypedDict):
+    """One attribute column of an input file, typed the way the loaders read it."""
+
+    name: str
+    type: Literal["number", "text", "boolean", "datetime", "other"]
+    sample: list[str | float | None]  # up to 3 values
+
+
 class InspectLayerResult(TypedDict):
     """Header facts about one input file (no geometry loaded)."""
 
@@ -284,6 +348,8 @@ class InspectLayerResult(TypedDict):
     geometry_type: GeometryKind
     bbox: list[float] | None  # WGS84 [minx, miny, maxx, maxy]; None for TABLE
     driver: str
+    columns: list[ColumnInfo]
+    geometry_column: str | None  # the name the loaders see ("geometry"); None for TABLE
 
 
 class LayerPreviewParams(TypedDict):
@@ -324,6 +390,10 @@ EXPORTED_TYPES: tuple[type, ...] = (
     AttributeInfo,
     DemographicsDefault,
     InputLayerInfo,
+    PresetAttribute,
+    PresetDemographics,
+    ODColumns,
+    InputPreset,
     DescribeResult,
     RunParams,
     RunCounts,
@@ -335,6 +405,7 @@ EXPORTED_TYPES: tuple[type, ...] = (
     WriteStats,
     RunResult,
     InspectLayerParams,
+    ColumnInfo,
     InspectLayerResult,
     LayerPreviewParams,
     PreviewFeature,

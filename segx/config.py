@@ -22,7 +22,7 @@ import warnings
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from segx.errors import ConfigKeyError, ConfigValueError
 
@@ -73,6 +73,22 @@ class DemographicAttribute(BaseModel):
     # column per class, in class order (``len(categories)`` / ``len(bins) - 1`` /
     # ``1`` for numeric). See ``io/demographics.class_columns_for``.
     class_columns: list[str] | None = None
+
+    @field_validator("bins", mode="before")
+    @classmethod
+    def _open_ended_bins(cls, value: Any) -> Any:
+        """``null`` as the first / last edge means an open range (-inf / +inf).
+
+        JSON has no infinity, so a host sending bins back over the wire writes the
+        open upper edge of e.g. ``[0, 1320, …, null]`` as ``null``.
+        """
+        if isinstance(value, list) and value:
+            value = list(value)
+            if value[0] is None:
+                value[0] = float("-inf")
+            if value[-1] is None:
+                value[-1] = float("inf")
+        return value
 
     @model_validator(mode="after")
     def _check_shape(self) -> DemographicAttribute:
@@ -151,6 +167,27 @@ class DemographicSchema(BaseModel):
             ],
         )
 
+    @classmethod
+    def lodes_default(cls) -> DemographicSchema:
+        """US LEHD/LODES home→work flows (the shape ``demo/segx_lodes.toml`` wires).
+
+        The census-block file is only a ``GEOID`` → geometry lookup; the income
+        classes are the OD file's ``SE01``/``SE02``/``SE03`` worker counts (job
+        earnings — the closest LODES proxy for income; a modelling choice).
+        """
+        return cls(
+            attribute_source="od",
+            polygon_id_column="GEOID",
+            attributes=[
+                DemographicAttribute(
+                    name="income",
+                    kind="categorical",
+                    categories=["low", "mid", "high"],
+                    class_columns=["SE01", "SE02", "SE03"],
+                ),
+            ],
+        )
+
     @property
     def attribute_names(self) -> list[str]:
         return [a.name for a in self.attributes]
@@ -177,41 +214,47 @@ class ODColumnMapping(BaseModel):
     location of an endpoint may be a WKT string or a lon/lat pair; for GeoPackage
     it is a geometry column; either may instead be an address column to geocode.
     Columns that are absent fall back to the ``default_*`` values below.
+
+    Every column field also accepts ``None`` = "not used": that strategy or column
+    is skipped even if the file happens to have a column with the default name.
+    A host that asks the user which column means what (the desktop app) sets the
+    chosen ones and ``None`` for the rest, so its mapping is followed exactly
+    rather than out-guessed by a default name.
     """
 
-    origin_id: str = "origin_id"
+    origin_id: str | None = "origin_id"
     #: Destination identity. Two flows ending at the same *place* must collapse to
     #: one destination or the OD destination-spread analysis
     #: (:mod:`segx.analysis.od_spread`) degenerates into a row count. Resolution
     #: order mirrors ``origin_id``: this column, else ``dest_id_ref`` (the id that
     #: already placed the endpoint, e.g. LODES ``wGEOID``), else the destination
     #: coordinates snapped to ``dest_id_precision_m``.
-    dest_id: str = "dest_id"
+    dest_id: str | None = "dest_id"
 
     # origin endpoint — first present of: geometry col, wkt col, lon+lat,
     # id-reference (an ID joined to the demographics geometry), address
-    origin_geom: str = "origin_geom"
-    origin_wkt: str = "origin_wkt"
-    origin_lon: str = "origin_lon"
-    origin_lat: str = "origin_lat"
+    origin_geom: str | None = "origin_geom"
+    origin_wkt: str | None = "origin_wkt"
+    origin_lon: str | None = "origin_lon"
+    origin_lat: str | None = "origin_lat"
     # Column whose values are IDs referencing the demographics ``polygon_id_column``
     # (e.g. a census-block GEOID); the endpoint is the representative point of the
     # matching geometry. This is how LODES-style ``hGEOID``/``wGEOID`` flow files
     # are placed — they carry no coordinates, only block IDs.
-    origin_id_ref: str = "origin_id_ref"
-    origin_address: str = "origin_address"
+    origin_id_ref: str | None = "origin_id_ref"
+    origin_address: str | None = "origin_address"
 
     # destination endpoint — same resolution order
-    dest_geom: str = "dest_geom"
-    dest_wkt: str = "dest_wkt"
-    dest_lon: str = "dest_lon"
-    dest_lat: str = "dest_lat"
-    dest_id_ref: str = "dest_id_ref"
-    dest_address: str = "dest_address"
+    dest_geom: str | None = "dest_geom"
+    dest_wkt: str | None = "dest_wkt"
+    dest_lon: str | None = "dest_lon"
+    dest_lat: str | None = "dest_lat"
+    dest_id_ref: str | None = "dest_id_ref"
+    dest_address: str | None = "dest_address"
 
-    category: str = "category"
-    mode: str = "mode"
-    weight: str = "weight"
+    category: str | None = "category"
+    mode: str | None = "mode"
+    weight: str | None = "weight"
 
     #: Grid used to derive a destination identity from coordinates when no
     #: destination id column exists. In metres because the endpoints are already
@@ -227,6 +270,21 @@ class ODColumnMapping(BaseModel):
 
     def mode_for(self, category: str) -> str:
         return self.default_mode_by_category.get(category, self.fallback_mode)
+
+    @classmethod
+    def lodes_default(cls) -> ODColumnMapping:
+        """A standard LODES ``*_od_*.csv``: endpoints are census-block ids joined to
+        the demographics ``GEOID``. Raw LODES has no ``S000``/``mode`` column — the
+        weight then defaults to 1 (the deposited mass is the class vector, not the
+        weight) and every flow routes on ``default_mode_by_category``."""
+        return cls(
+            origin_id_ref="hGEOID",
+            dest_id_ref="wGEOID",
+            weight="S000",
+            mode="mode",
+            default_category="commute",
+            default_mode_by_category={"commute": "car"},
+        )
 
 
 # --------------------------------------------------------------------------- #
