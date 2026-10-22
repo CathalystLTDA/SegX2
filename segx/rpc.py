@@ -60,13 +60,14 @@ import contextlib
 import json
 import logging
 import math
+import os
 import sys
 import threading
 import time
 import traceback
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 # Importing entropy registers the P4 metrics (``diversity`` etc.) so ``describe``
 # reports them as available — same registration side-effect the orchestrator uses.
@@ -89,6 +90,9 @@ _OD_ONLY_STAGES = frozenset({"load_od_pairs", "analyse_od_spread", "route_od_pai
 
 _write_lock = threading.Lock()
 
+#: The protocol channel once :func:`_claim_stdout` reserved it; ``None`` = ``sys.stdout``.
+_protocol_out: TextIO | None = None
+
 
 # --------------------------------------------------------------------------- #
 # Wire I/O                                                                     #
@@ -103,11 +107,38 @@ def _json_default(obj: object) -> str:
 
 
 def _send(obj: dict[str, Any]) -> None:
-    """Write one JSON line to stdout, atomically (worker threads may call this)."""
+    """Write one JSON line to the protocol channel, atomically (worker threads may call this)."""
     line = json.dumps(obj, default=_json_default, ensure_ascii=False)
+    out = _protocol_out or sys.stdout
     with _write_lock:
-        sys.stdout.write(line + "\n")
-        sys.stdout.flush()
+        out.write(line + "\n")
+        out.flush()
+
+
+def _claim_stdout() -> None:
+    """Reserve the process's real stdout for the protocol; send fd 1 to stderr.
+
+    Native libraries print straight to file descriptor 1, below ``sys.stdout``:
+    pandana's C++ contraction-hierarchy build writes ``Generating contraction
+    hierarchies … . 10% . 20% …`` there. On the protocol channel that text lands
+    between JSON lines — or glued in front of one — and the host drops or
+    misreads the message (a progress tick, or the terminal reply). So: duplicate
+    fd 1 as the protocol channel, then point fd 1 and ``sys.stdout`` at stderr,
+    where any stray print is harmless diagnostics.
+
+    Skipped when ``sys.stdout`` is not the real stdout (tests swap in a buffer).
+    """
+    global _protocol_out
+    try:
+        if sys.stdout.fileno() != 1:
+            return
+    except (AttributeError, OSError, ValueError):  # io.StringIO and friends
+        return
+    sys.stdout.flush()
+    protocol_fd = os.dup(1)
+    os.dup2(2, 1)
+    _protocol_out = os.fdopen(protocol_fd, "w", encoding="utf-8", newline="\n")
+    sys.stdout = sys.stderr
 
 
 def _event(run_id: Any, event: str, **fields: Any) -> None:
@@ -476,6 +507,7 @@ def _reply_sync(msg_id: Any, fn: Callable[[], Any]) -> None:
 def serve() -> None:
     """Read requests from stdin until EOF or ``shutdown``; dispatch each one."""
     _configure_stdio()
+    _claim_stdout()  # native libraries must not write into the protocol channel
     logging.captureWarnings(True)  # route warnings.warn(...) into the log stream
     runs: dict[Any, threading.Event] = {}
 

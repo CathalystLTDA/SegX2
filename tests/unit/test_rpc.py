@@ -11,6 +11,7 @@ from __future__ import annotations
 import io
 import json
 import math
+import sys
 
 import geopandas as gpd
 import pytest
@@ -310,3 +311,41 @@ def test_serve_od_modes_unknown_column_is_a_typed_error(monkeypatch, tmp_path):
     assert reply["ok"] is False
     assert reply["error"]["code"] == "input.invalid"
     assert reply["error"]["details"]["column"] == "mode"
+
+
+# --------------------------------------------------------------------------- #
+# Protocol channel vs. native stdout                                           #
+# --------------------------------------------------------------------------- #
+
+
+def test_native_writes_to_fd1_never_reach_the_protocol_channel():
+    """pandana's C++ prints progress straight to fd 1 (no newline). In the sidecar
+    that text must land on stderr, never inside or between protocol lines."""
+    import subprocess
+
+    code = (
+        "import os\n"
+        "from segx import rpc\n"
+        "real = rpc._describe\n"
+        "def noisy():\n"
+        "    os.write(1, b'. 10% . 20% NATIVE NOISE')\n"  # like pandana: fd 1, no newline
+        "    print('python print')\n"
+        "    return real()\n"
+        "rpc._describe = noisy\n"
+        "rpc.serve()\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        input='{"id": 1, "method": "describe"}\n{"id": 2, "method": "shutdown"}\n',
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+    )
+
+    lines = [line for line in proc.stdout.splitlines() if line.strip()]
+    messages = [json.loads(line) for line in lines]  # every stdout line is protocol JSON
+    assert [m.get("id") for m in messages] == [None, 1, 2]  # ready, describe, bye
+    assert messages[1]["ok"] is True
+    assert "NATIVE NOISE" in proc.stderr
+    assert "python print" in proc.stderr
