@@ -76,6 +76,8 @@ export interface MetricInfo {
   available: boolean;
   phase: string;
   note?: string;
+  description?: string;
+  formula?: string;
 }
 
 /** How the ``transit`` mode is sourced (GTFS vs. the OSM fallback). */

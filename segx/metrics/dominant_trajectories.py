@@ -35,6 +35,11 @@ class DominantTrajectoriesMetric(Metric):
     """Per-segment dominant class + homogeneity-weighted dominance. P5."""
 
     name = "dominant_trajectories"
+    description = (
+        "Which class has the strongest presence on each segment (its colour on the map), and how "
+        "sharply it dominates the rest: ≈ 0 for a near tie, 1 for a single class."
+    )
+    formula = "dominant(s) = argmaxᵢ Pᵢ(s)\ndominance(s) = 1 − h(s)"
     #: the network-wide indicator averages the dominance weight
     value_column = "dominance"
 

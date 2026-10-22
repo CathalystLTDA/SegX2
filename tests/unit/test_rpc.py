@@ -349,3 +349,16 @@ def test_native_writes_to_fd1_never_reach_the_protocol_channel():
     assert messages[1]["ok"] is True
     assert "NATIVE NOISE" in proc.stderr
     assert "python print" in proc.stderr
+
+
+def test_describe_documents_every_registered_metric():
+    """The Indicators screen shows each metric's description and formula from describe."""
+    metrics = rpc._describe()["metrics"]
+    registered = [m for m in metrics if m["available"]]
+
+    assert len(registered) == 8
+    for m in registered:
+        assert m["description"].strip(), m["name"]
+        assert m["formula"].strip(), m["name"]
+    diversity = next(m for m in registered if m["name"] == "diversity")
+    assert diversity["formula"].startswith("D(s) = ")

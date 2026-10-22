@@ -42,6 +42,13 @@ class SegregatedTrajectoriesMetric(Metric):
     """Per-segment dominant-group location quotient + exclusivity flag. P5."""
 
     name = "segregated_trajectories"
+    description = (
+        "Segments used disproportionately by a single class: a segment is exclusive when its "
+        "dominant class is at least τ times more present there than across the whole city "
+        "(location quotient); τ = metrics.exclusive_lq_threshold (default 2.0). Network value: "
+        "share of exclusive segments per dominant class."
+    )
+    formula = "LQ_g(s) = [P_g(s) / Pₜ(s)] / [Σₛ′ P_g(s′) / Σₛ′ Pₜ(s′)]\nexclusive(s) = LQ_dominant(s) ≥ τ"
     value_column = "lq"
 
     def compute(self, edge_table, settings: Settings):

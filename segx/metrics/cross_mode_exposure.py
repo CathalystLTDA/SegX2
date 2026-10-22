@@ -275,6 +275,16 @@ class CrossModeExposureMetric(Metric):
     """Per-group mean segment diversity with other modes counted at a discount. P7.1."""
 
     name = "cross_mode_exposure"
+    description = (
+        "Exposure after also counting the people on the same street who travel by another mode (a "
+        "pedestrian and a bus passenger on one avenue), discounted by metrics.cross_mode.factor "
+        "(default 0.5). Non-trivial only for OD flows that mix modes; it can be lower than "
+        "exposure."
+    )
+    formula = (
+        "Pᵢᵉᶠᶠ(s, m) = Σₘ′ f(m, m′) · Pᵢ(s, m′)   with f(m, m) = 1\n"
+        "E_g(m) = Σₛ P_g(s, m) · H(Pᵉᶠᶠ(s, m)) / Σₛ P_g(s, m)"
+    )
 
     def compute(self, edge_table, settings: Settings):
         import numpy as np

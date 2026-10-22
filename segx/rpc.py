@@ -77,7 +77,7 @@ from segx.errors import OperationCancelled, SegXError
 from segx.io.demographics import class_columns_for
 from segx.io.inspect import inspect_layer, layer_preview, od_modes
 from segx.io.writers import build_provenance
-from segx.metrics.registry import available_metrics
+from segx.metrics.registry import available_metrics, get_metric
 from segx.orchestrator import PIPELINE_STAGES, RunResult, run_pipeline
 from segx.progress import ProgressEvent
 
@@ -208,7 +208,18 @@ def _engine_version() -> str:
 def _metric_catalog() -> list[dict[str, Any]]:
     """Registered metrics (available) + planned P5 metrics (disabled, with reason)."""
     registered = set(available_metrics())
-    catalog = [{"name": name, "available": True, "phase": "P4"} for name in sorted(registered)]
+    catalog = []
+    for name in sorted(registered):
+        metric = get_metric(name)
+        catalog.append(
+            {
+                "name": name,
+                "available": True,
+                "phase": "P4",
+                "description": metric.description,
+                "formula": metric.formula,
+            }
+        )
     for name in _PLANNED_METRICS:
         if name not in registered:
             catalog.append(

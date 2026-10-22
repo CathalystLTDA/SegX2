@@ -22,6 +22,12 @@ class Metric(abc.ABC):
     #: unique short name used for registration and as the output column prefix
     name: str
 
+    #: plain-language summary and the formula (plain text, Unicode math, one
+    #: expression per line) — what ``describe`` shows the user. Follow
+    #: ``reports/metric-formulas.md``; keep the two in sync.
+    description: str = ""
+    formula: str = ""
+
     #: the per-segment value column :meth:`summarize` averages into a
     #: network-wide indicator. Defaults to ``name`` (the convention: a per-segment
     #: metric names its value column after itself). Override when the frame's value

@@ -147,6 +147,16 @@ class ShannonEntropyMetric(Metric):
     """
 
     name = "diversity"
+    description = (
+        "Social diversity of each street segment, weighted by how many people pass it — the "
+        "formula of Netto et al. (2018). A busy avenue carrying every class scores far above a "
+        "mixed alley."
+    )
+    formula = (
+        "D(s) = −Σᵢ Pᵢ · log₂(Pᵢ / Pₜ) = Pₜ · H(s)\n"
+        "H(s) = −Σᵢ pᵢ · log₂ pᵢ   (Shannon entropy, bits)\n"
+        "Pᵢ = people of class i on segment s · Pₜ = Σᵢ Pᵢ · pᵢ = Pᵢ / Pₜ"
+    )
 
     #: the columns identifying one segment-under-a-partition-and-attribute
     GROUP_KEYS = ("mode", "category", "binding", "u", "v", "key", "attribute")
@@ -189,6 +199,15 @@ class ExperiencedSegregationMetric(Metric):
     """
 
     name = "experienced_segregation"
+    description = (
+        "How socially homogeneous each segment is along the trajectories: 0 = every class equally "
+        "present, 1 = a single class. Network value: mean over segments."
+    )
+    formula = (
+        "S(s) = 1 − h(s)\n"
+        "h(s) = H(s) / log₂ n   (normalized entropy, 0–1)\n"
+        "n = number of possible classes of the attribute"
+    )
 
     def compute(self, edge_table, settings: Settings):  # noqa: ARG002
         def _seg(masses):
@@ -208,6 +227,11 @@ class IntergroupContactMetric(Metric):
     """
 
     name = "intergroup_contact"
+    description = (
+        "Probability that two people drawn at random from a segment belong to different classes "
+        "(Gini–Simpson). 0 = contact between classes is impossible."
+    )
+    formula = "C(s) = 1 − Σᵢ pᵢ²\npᵢ = Pᵢ / Pₜ"
 
     def compute(self, edge_table, settings: Settings):  # noqa: ARG002
         return _per_segment(edge_table, gini_simpson, self.name)

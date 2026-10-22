@@ -629,6 +629,16 @@ class PathFragmentationMetric(Metric):
     """
 
     name = "path_fragmentation"
+    description = (
+        "Fractal dimension of each routed path (box counting on 0.7 m pixels at 5× coarser "
+        "scales): how fragmented a class's trips are. Mean per class, weighted by the class's "
+        "presence on each path."
+    )
+    formula = (
+        "N(r) = K · r^(1−D)   r = 0.7, 3.5, 17.5, 87.5, 437.5, 2187.5 m\n"
+        "D = 1 − slope of log N(r) against log r\n"
+        "N(r) = pixels the path occupies at scale r"
+    )
     value_column = "fragmentation"
     requires = ("path_table",)
 

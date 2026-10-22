@@ -36,6 +36,13 @@ class ExposureMetric(Metric):
     """Per-group mean segment diversity over the segments the group traverses. P5."""
 
     name = "exposure"
+    description = (
+        "One value per social class: how much diversity that class meets along its daily "
+        "trajectories, weighting each segment by how present the class is on it."
+    )
+    formula = (
+        "E_g = Σₛ P_g(s) · H(s) / Σₛ P_g(s)   over the segments with P_g(s) > 0\nH(s) = Shannon entropy of segment s"
+    )
 
     def compute(self, edge_table, settings: Settings):  # noqa: ARG002
         import numpy as np

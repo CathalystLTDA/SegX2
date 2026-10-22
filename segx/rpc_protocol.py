@@ -121,6 +121,8 @@ class MetricInfo(TypedDict):
     available: bool
     phase: str
     note: NotRequired[str]
+    description: NotRequired[str]  # plain-language summary (registered metrics)
+    formula: NotRequired[str]  # plain text, Unicode math, one expression per line
 
 
 class TransitInfo(TypedDict):
