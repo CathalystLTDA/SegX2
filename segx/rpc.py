@@ -65,7 +65,7 @@ import sys
 import threading
 import time
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -90,8 +90,10 @@ _OD_ONLY_STAGES = frozenset({"load_od_pairs", "analyse_od_spread", "route_od_pai
 
 _write_lock = threading.Lock()
 
-#: The protocol channel once :func:`_claim_stdout` reserved it; ``None`` = ``sys.stdout``.
+#: The protocol channels once :func:`_claim_stdout` / :func:`_claim_stdin` reserved
+#: them; ``None`` = ``sys.stdout`` / ``sys.stdin``.
 _protocol_out: TextIO | None = None
+_protocol_in: TextIO | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -139,6 +141,34 @@ def _claim_stdout() -> None:
     os.dup2(2, 1)
     _protocol_out = os.fdopen(protocol_fd, "w", encoding="utf-8", newline="\n")
     sys.stdout = sys.stderr
+
+
+def _claim_stdin() -> None:
+    """Read the protocol from a duplicate of stdin; point fd 0 at the null device.
+
+    The dispatch loop blocks reading stdin while a run executes on a worker
+    thread. On Windows a synchronous pipe handle serializes every operation on
+    it behind a pending read, and some native libraries query the standard
+    handles while their DLL loads — scipy's Fortran runtime, pulled in lazily by
+    ``import osmnx`` → sklearn → ``scipy.special``. The run thread then waits on
+    that import until the host sends another message (seen as a run stuck at
+    ``build_networks`` with no CPU). With fd 0 on the null device, a library
+    that looks at stdin finds nothing pending; the protocol keeps its own handle.
+
+    Skipped when ``sys.stdin`` is not the real stdin (tests swap in a buffer).
+    """
+    global _protocol_in
+    try:
+        if sys.stdin.fileno() != 0:
+            return
+    except (AttributeError, OSError, ValueError):  # io.StringIO and friends
+        return
+    protocol_fd = os.dup(0)
+    null_fd = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(null_fd, 0)
+    os.close(null_fd)
+    _protocol_in = os.fdopen(protocol_fd, "r", encoding="utf-8", newline="\n")
+    sys.stdin = open(os.devnull, encoding="utf-8")  # noqa: SIM115 — lives for the process
 
 
 def _event(run_id: Any, event: str, **fields: Any) -> None:
@@ -504,16 +534,22 @@ def _reply_sync(msg_id: Any, fn: Callable[[], Any]) -> None:
         _ok(msg_id, result)
 
 
+def _stdin_lines() -> Iterator[str]:
+    """Request lines from the protocol input (see :func:`_claim_stdin`)."""
+    yield from _protocol_in or sys.stdin
+
+
 def serve() -> None:
     """Read requests from stdin until EOF or ``shutdown``; dispatch each one."""
     _configure_stdio()
     _claim_stdout()  # native libraries must not write into the protocol channel
+    _claim_stdin()  # ...nor block on the protocol input while their DLLs load
     logging.captureWarnings(True)  # route warnings.warn(...) into the log stream
     runs: dict[Any, threading.Event] = {}
 
     _send({"event": "ready", "engine": "segx", "version": _engine_version()})
 
-    for raw in sys.stdin:
+    for raw in _stdin_lines():
         line = raw.strip()
         if not line:
             continue
