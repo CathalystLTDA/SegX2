@@ -145,6 +145,40 @@ def inspect_layer(path: str | Path) -> dict[str, Any]:
     }
 
 
+def od_modes(path: str | Path, mode_column: str) -> dict[str, Any]:
+    """How many OD flows name each travel mode, and the graph each one routes on.
+
+    Reads only ``mode_column`` (all rows — a 3-row sample cannot tell whether a
+    file asks for transit). Labels are translated by the orchestrator's own
+    alias table (``car`` → ``drive``, ``bus``/``subway`` → ``transit``), so the
+    host learns which networks a run must build — and that transit has to be
+    enabled — before it starts, instead of the run failing in P3.
+    """
+    import pandas as pd
+
+    from segx.orchestrator import _OD_MODE_ALIAS
+
+    path = Path(path)
+    if not path.exists():
+        raise InputFileNotFoundError(f"OD pairs file not found: {path}", details={"path": str(path)})
+    try:
+        if path.suffix.lower() == ".csv":
+            values = pd.read_csv(path, usecols=[mode_column], dtype=str)[mode_column]
+        else:
+            values = pyogrio.read_dataframe(path, columns=[mode_column], read_geometry=False)[mode_column]
+    except (ValueError, KeyError, DataSourceError, DataLayerError) as exc:
+        raise InputError(
+            f"cannot read column {mode_column!r} of {path}: {exc}",
+            details={"path": str(path), "column": mode_column},
+        ) from exc
+    counts = values.dropna().astype(str).value_counts()
+    return {
+        "counts": {str(label): int(n) for label, n in counts.items()},
+        "graph_modes": {str(label): _OD_MODE_ALIAS.get(str(label), str(label)) for label in counts.index},
+        "missing": int(values.isna().sum()),
+    }
+
+
 def _scalar(value: Any) -> str | float | None:
     """JSON-safe scalar for a preview property or column sample (NaN/None → None).
 

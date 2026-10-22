@@ -42,6 +42,9 @@ Methods:
 * ``get_layer_preview`` — the first ``max_features`` (default 1000) features of
                       ``path`` as simplified WGS84 GeoJSON for the Setup map.
                       Sync, display-only (see :mod:`segx.io.inspect`).
+* ``od_modes``      — counts of each value of an OD file's ``mode_column`` and
+                      the graph each routes on (``bus`` → ``transit``), so the
+                      host can enable transit / build the right networks. Sync.
 * ``ping`` / ``shutdown`` — liveness / clean stop.
 
 Run:  ``uv run python -m segx.rpc``  (dev)  /  the frozen binary  (prod).
@@ -71,7 +74,7 @@ import segx.metrics.entropy  # noqa: E402,F401
 from segx.config import DEFAULT_POI_PRESETS, DemographicSchema, ODColumnMapping, Settings
 from segx.errors import OperationCancelled, SegXError
 from segx.io.demographics import class_columns_for
-from segx.io.inspect import inspect_layer, layer_preview
+from segx.io.inspect import inspect_layer, layer_preview, od_modes
 from segx.io.writers import build_provenance
 from segx.metrics.registry import available_metrics
 from segx.orchestrator import PIPELINE_STAGES, RunResult, run_pipeline
@@ -498,6 +501,8 @@ def serve() -> None:
             _ok(msg_id, "pong")
         elif method == "inspect_layer":
             _reply_sync(msg_id, lambda p=params: inspect_layer(p["path"]))
+        elif method == "od_modes":
+            _reply_sync(msg_id, lambda p=params: od_modes(p["path"], p["mode_column"]))
         elif method == "get_layer_preview":
             _reply_sync(msg_id, lambda p=params: layer_preview(p["path"], int(p.get("max_features", 1000))))
         elif method == "cancel":

@@ -6,12 +6,12 @@
 
 
 export type CorrelationId = string | number | null;
-export type Method = "describe" | "run_pipeline" | "cancel" | "inspect_layer" | "get_layer_preview" | "ping" | "shutdown";
+export type Method = "describe" | "run_pipeline" | "cancel" | "inspect_layer" | "get_layer_preview" | "od_modes" | "ping" | "shutdown";
 
 /** One request line, host → engine. */
 export interface Request {
   id?: string | number | null;
-  method: "describe" | "run_pipeline" | "cancel" | "inspect_layer" | "get_layer_preview" | "ping" | "shutdown";
+  method: "describe" | "run_pipeline" | "cancel" | "inspect_layer" | "get_layer_preview" | "od_modes" | "ping" | "shutdown";
   params?: Record<string, unknown>;
 }
 
@@ -298,4 +298,16 @@ export interface LayerPreviewResult {
   geometry_type: "POINT" | "LINE" | "POLYGON" | "TABLE";
   total_features: number;
   features: PreviewFeature[];
+}
+
+export interface ODModesParams {
+  path: string;
+  mode_column: string;
+}
+
+/** How many OD flows name each mode, and the graph each label routes on. */
+export interface ODModesResult {
+  counts: Record<string, number>;
+  graph_modes: Record<string, string>;
+  missing: number;
 }

@@ -31,7 +31,9 @@ from typing import Any, Literal, NotRequired, TypedDict
 CorrelationId = str | int | None
 
 #: The methods the sidecar accepts.
-Method = Literal["describe", "run_pipeline", "cancel", "inspect_layer", "get_layer_preview", "ping", "shutdown"]
+Method = Literal[
+    "describe", "run_pipeline", "cancel", "inspect_layer", "get_layer_preview", "od_modes", "ping", "shutdown"
+]
 
 
 class Request(TypedDict):
@@ -373,6 +375,19 @@ class LayerPreviewResult(TypedDict):
     features: list[PreviewFeature]
 
 
+class ODModesParams(TypedDict):
+    path: str
+    mode_column: str
+
+
+class ODModesResult(TypedDict):
+    """How many OD flows name each mode, and the graph each label routes on."""
+
+    counts: dict[str, int]  # label -> flows, e.g. {"car": 562, "bus": 237}
+    graph_modes: dict[str, str]  # label -> graph, e.g. {"car": "drive", "bus": "transit"}
+    missing: int  # rows with no mode value
+
+
 #: Emission order for codegen (leaf types before the aggregates that use them).
 EXPORTED_TYPES: tuple[type, ...] = (
     Request,
@@ -410,4 +425,6 @@ EXPORTED_TYPES: tuple[type, ...] = (
     LayerPreviewParams,
     PreviewFeature,
     LayerPreviewResult,
+    ODModesParams,
+    ODModesResult,
 )

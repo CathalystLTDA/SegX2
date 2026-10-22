@@ -279,3 +279,34 @@ def test_a_preset_sent_back_as_overrides_validates(name):
     for attr in settings.demographics.attributes:
         if attr.bins is not None:
             assert attr.bins[-1] == math.inf  # null read back as an open edge
+
+
+# --------------------------------------------------------------------------- #
+# od_modes                                                                     #
+# --------------------------------------------------------------------------- #
+
+
+def test_od_modes_counts_every_row_and_maps_labels_to_graphs(tmp_path):
+    from segx.io.inspect import od_modes
+
+    path = tmp_path / "od.csv"
+    path.write_text("o,d,mode\n1,2,car\n1,3,bus\n2,3,subway\n3,1,car\n4,1,\n5,2,walk\n", encoding="utf-8")
+
+    result = od_modes(path, "mode")
+
+    assert result["counts"] == {"car": 2, "bus": 1, "subway": 1, "walk": 1}
+    assert result["graph_modes"] == {"car": "drive", "bus": "transit", "subway": "transit", "walk": "walk"}
+    assert result["missing"] == 1
+
+
+def test_serve_od_modes_unknown_column_is_a_typed_error(monkeypatch, tmp_path):
+    path = tmp_path / "od.csv"
+    path.write_text("o,d\n1,2\n", encoding="utf-8")
+
+    reply = _serve(monkeypatch, {"id": 1, "method": "od_modes", "params": {"path": str(path), "mode_column": "mode"}})[
+        1
+    ]
+
+    assert reply["ok"] is False
+    assert reply["error"]["code"] == "input.invalid"
+    assert reply["error"]["details"]["column"] == "mode"
