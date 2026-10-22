@@ -31,7 +31,7 @@ from typing import Any, Literal, NotRequired, TypedDict
 CorrelationId = str | int | None
 
 #: The methods the sidecar accepts.
-Method = Literal["describe", "run_pipeline", "cancel", "ping", "shutdown"]
+Method = Literal["describe", "run_pipeline", "cancel", "inspect_layer", "get_layer_preview", "ping", "shutdown"]
 
 
 class Request(TypedDict):
@@ -121,9 +121,24 @@ class MetricInfo(TypedDict):
     note: NotRequired[str]
 
 
+class TransitInfo(TypedDict):
+    """How the ``transit`` mode is sourced (GTFS vs. the OSM fallback)."""
+
+    sources: list[str]
+    note: str
+    service_window_note: str
+
+
 class NetworkInfo(TypedDict):
     modes: list[str]
     engines: list[str]
+    transit: TransitInfo
+
+
+class PoiPreset(TypedDict):
+    """One POI category: an OSMnx/QuackOSM-style tag filter."""
+
+    tags: dict[str, Any]
 
 
 class AttributeInfo(TypedDict):
@@ -149,7 +164,7 @@ class DescribeResult(TypedDict):
     pipeline_stages: list[str]
     metrics: list[MetricInfo]
     network: NetworkInfo
-    poi_presets: dict[str, Any]
+    poi_presets: dict[str, PoiPreset]
     demographics_default: DemographicsDefault
     config_schema: dict[str, Any]  # Settings.model_json_schema()
     input_layers: dict[str, InputLayerInfo]
@@ -184,6 +199,23 @@ class RunCounts(TypedDict):
     trajectories: int
     segments: int
     partitions: int
+
+
+class BindingReachability(TypedDict):
+    """Reachable vs. unreachable trajectories of one binding, by reason."""
+
+    total: int
+    reachable: int
+    unreachable: int
+    reasons: dict[str, int]
+
+
+class SnappingAudit(TypedDict):
+    """``reachability["snapping"]``: snaps beyond tolerance are flagged, not dropped."""
+
+    origins_over_tolerance: int
+    pois_over_tolerance: int
+    tolerance_m: float
 
 
 class Conservation(TypedDict):
@@ -222,13 +254,57 @@ class RunResult(TypedDict):
     snapshot_date: str | None
     phase: str
     counts: RunCounts
-    reachability: dict[str, Any]
+    # one entry per binding, plus the "snapping" audit
+    reachability: dict[str, BindingReachability | SnappingAudit]
     conservation: Conservation
     diversity: dict[str, DiversityStat]
     od_spread: dict[str, Any] | None
     provenance: dict[str, Any]  # the stamp written into both files, minus the settings dump
     write_stats: WriteStats
     artifacts: list[Artifact]
+
+
+# --------------------------------------------------------------------------- #
+# inspect_layer / get_layer_preview — display-only layer reads                #
+# --------------------------------------------------------------------------- #
+
+#: Geometry kind of a layer; ``TABLE`` = no geometry (e.g. a plain CSV).
+GeometryKind = Literal["POINT", "LINE", "POLYGON", "TABLE"]
+
+
+class InspectLayerParams(TypedDict):
+    path: str
+
+
+class InspectLayerResult(TypedDict):
+    """Header facts about one input file (no geometry loaded)."""
+
+    crs: str | None  # None = the file declares no CRS
+    feature_count: int
+    geometry_type: GeometryKind
+    bbox: list[float] | None  # WGS84 [minx, miny, maxx, maxy]; None for TABLE
+    driver: str
+
+
+class LayerPreviewParams(TypedDict):
+    path: str
+    max_features: NotRequired[int]
+
+
+class PreviewFeature(TypedDict):
+    """One GeoJSON feature in WGS84, simplified, with a few scalar properties."""
+
+    type: Literal["Feature"]
+    geometry: dict[str, Any]
+    properties: dict[str, str | float | None]
+
+
+class LayerPreviewResult(TypedDict):
+    """Display-only sample of a layer: the first ``max_features`` features."""
+
+    geometry_type: GeometryKind
+    total_features: int
+    features: list[PreviewFeature]
 
 
 #: Emission order for codegen (leaf types before the aggregates that use them).
@@ -242,16 +318,25 @@ EXPORTED_TYPES: tuple[type, ...] = (
     LogEventMsg,
     EngineInfo,
     MetricInfo,
+    TransitInfo,
     NetworkInfo,
+    PoiPreset,
     AttributeInfo,
     DemographicsDefault,
     InputLayerInfo,
     DescribeResult,
     RunParams,
     RunCounts,
+    BindingReachability,
+    SnappingAudit,
     Conservation,
     DiversityStat,
     Artifact,
     WriteStats,
     RunResult,
+    InspectLayerParams,
+    InspectLayerResult,
+    LayerPreviewParams,
+    PreviewFeature,
+    LayerPreviewResult,
 )

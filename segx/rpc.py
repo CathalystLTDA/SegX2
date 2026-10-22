@@ -36,6 +36,11 @@ Methods:
                       ``run_pipeline`` request ``id``); the run unwinds via
                       :class:`~segx.errors.OperationCancelled` and returns a
                       terminal error with ``code == "cancelled"``.
+* ``inspect_layer``  — header facts for one input file (``path``): CRS, feature
+                      count, geometry kind, WGS84 bbox, driver. Sync, display-only.
+* ``get_layer_preview`` — the first ``max_features`` (default 1000) features of
+                      ``path`` as simplified WGS84 GeoJSON for the Setup map.
+                      Sync, display-only (see :mod:`segx.io.inspect`).
 * ``ping`` / ``shutdown`` — liveness / clean stop.
 
 Run:  ``uv run python -m segx.rpc``  (dev)  /  the frozen binary  (prod).
@@ -54,6 +59,7 @@ import sys
 import threading
 import time
 import traceback
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +68,7 @@ from typing import Any
 import segx.metrics.entropy  # noqa: E402,F401
 from segx.config import DEFAULT_POI_PRESETS, DemographicSchema, Settings
 from segx.errors import OperationCancelled, SegXError
+from segx.io.inspect import inspect_layer, layer_preview
 from segx.io.writers import build_provenance
 from segx.metrics.registry import available_metrics
 from segx.orchestrator import PIPELINE_STAGES, RunResult, run_pipeline
@@ -403,6 +410,20 @@ def _execute(run_id: Any, params: dict[str, Any], cancel_event: threading.Event)
 # --------------------------------------------------------------------------- #
 
 
+def _reply_sync(msg_id: Any, fn: Callable[[], Any]) -> None:
+    """Run a quick synchronous method and send its terminal reply or typed error."""
+    try:
+        result = fn()
+    except SegXError as exc:
+        _err(msg_id, exc.code, exc.message, exc.details)
+    except KeyError as exc:  # a missing required param (e.g. path)
+        _err(msg_id, "rpc.bad_params", f"missing required parameter: {exc}", {})
+    except Exception as exc:  # noqa: BLE001 - never crash the dispatch loop
+        _err(msg_id, "internal", str(exc), {"traceback": traceback.format_exc()})
+    else:
+        _ok(msg_id, result)
+
+
 def serve() -> None:
     """Read requests from stdin until EOF or ``shutdown``; dispatch each one."""
     _configure_stdio()
@@ -429,6 +450,10 @@ def serve() -> None:
             _ok(msg_id, _describe())
         elif method == "ping":
             _ok(msg_id, "pong")
+        elif method == "inspect_layer":
+            _reply_sync(msg_id, lambda p=params: inspect_layer(p["path"]))
+        elif method == "get_layer_preview":
+            _reply_sync(msg_id, lambda p=params: layer_preview(p["path"], int(p.get("max_features", 1000))))
         elif method == "cancel":
             target = params.get("runId")
             event = runs.get(target)

@@ -139,7 +139,9 @@ uv run segx-rpc
 The RPC protocol is defined in [`segx/rpc_protocol.py`](segx/rpc_protocol.py), with
 a generated TypeScript mirror in [`contracts/segx-rpc.ts`](contracts/segx-rpc.ts).
 `describe` returns the configuration JSON schema, so the app builds its settings
-UI from the engine.
+UI from the engine. `inspect_layer` and `get_layer_preview` read an input file's
+header facts and a small WGS84 GeoJSON sample for the app's setup screen, so the
+app needs no GDAL of its own (display only; runs always use the real loaders).
 
 ## Demo: Philadelphia, end to end
 

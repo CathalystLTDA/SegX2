@@ -6,12 +6,12 @@
 
 
 export type CorrelationId = string | number | null;
-export type Method = "describe" | "run_pipeline" | "cancel" | "ping" | "shutdown";
+export type Method = "describe" | "run_pipeline" | "cancel" | "inspect_layer" | "get_layer_preview" | "ping" | "shutdown";
 
 /** One request line, host → engine. */
 export interface Request {
   id?: string | number | null;
-  method: "describe" | "run_pipeline" | "cancel" | "ping" | "shutdown";
+  method: "describe" | "run_pipeline" | "cancel" | "inspect_layer" | "get_layer_preview" | "ping" | "shutdown";
   params?: Record<string, unknown>;
 }
 
@@ -78,9 +78,22 @@ export interface MetricInfo {
   note?: string;
 }
 
+/** How the ``transit`` mode is sourced (GTFS vs. the OSM fallback). */
+export interface TransitInfo {
+  sources: string[];
+  note: string;
+  service_window_note: string;
+}
+
 export interface NetworkInfo {
   modes: string[];
   engines: string[];
+  transit: TransitInfo;
+}
+
+/** One POI category: an OSMnx/QuackOSM-style tag filter. */
+export interface PoiPreset {
+  tags: Record<string, unknown>;
 }
 
 export interface AttributeInfo {
@@ -105,7 +118,7 @@ export interface DescribeResult {
   pipeline_stages: string[];
   metrics: MetricInfo[];
   network: NetworkInfo;
-  poi_presets: Record<string, unknown>;
+  poi_presets: Record<string, PoiPreset>;
   demographics_default: DemographicsDefault;
   config_schema: Record<string, unknown>;
   input_layers: Record<string, InputLayerInfo>;
@@ -134,6 +147,21 @@ export interface RunCounts {
   trajectories: number;
   segments: number;
   partitions: number;
+}
+
+/** Reachable vs. unreachable trajectories of one binding, by reason. */
+export interface BindingReachability {
+  total: number;
+  reachable: number;
+  unreachable: number;
+  reasons: Record<string, number>;
+}
+
+/** ``reachability["snapping"]``: snaps beyond tolerance are flagged, not dropped. */
+export interface SnappingAudit {
+  origins_over_tolerance: number;
+  pois_over_tolerance: number;
+  tolerance_m: number;
 }
 
 export interface Conservation {
@@ -170,11 +198,43 @@ export interface RunResult {
   snapshot_date: string | null;
   phase: string;
   counts: RunCounts;
-  reachability: Record<string, unknown>;
+  reachability: Record<string, BindingReachability | SnappingAudit>;
   conservation: Conservation;
   diversity: Record<string, DiversityStat>;
   od_spread: Record<string, unknown> | null;
   provenance: Record<string, unknown>;
   write_stats: WriteStats;
   artifacts: Artifact[];
+}
+
+export interface InspectLayerParams {
+  path: string;
+}
+
+/** Header facts about one input file (no geometry loaded). */
+export interface InspectLayerResult {
+  crs: string | null;
+  feature_count: number;
+  geometry_type: "POINT" | "LINE" | "POLYGON" | "TABLE";
+  bbox: number[] | null;
+  driver: string;
+}
+
+export interface LayerPreviewParams {
+  path: string;
+  max_features?: number;
+}
+
+/** One GeoJSON feature in WGS84, simplified, with a few scalar properties. */
+export interface PreviewFeature {
+  type: "Feature";
+  geometry: Record<string, unknown>;
+  properties: Record<string, string | number | null>;
+}
+
+/** Display-only sample of a layer: the first ``max_features`` features. */
+export interface LayerPreviewResult {
+  geometry_type: "POINT" | "LINE" | "POLYGON" | "TABLE";
+  total_features: number;
+  features: PreviewFeature[];
 }
