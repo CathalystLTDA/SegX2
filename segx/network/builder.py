@@ -3,7 +3,8 @@ working CRS, attach mode-specific travel-time weights.
 
 Three layers, separable on purpose:
 
-* :func:`fetch_raw_graph` — the only place that hits the network (live OSMnx).
+* :func:`fetch_raw_graph` — the only place that hits the network (live OSMnx),
+  or reads the local ``.osm.pbf`` extract when ``network.osm_pbf_url`` is set.
   Called once per ``(boundary, mode)`` cache miss.
 * :func:`project_graph` and :func:`attach_travel_times` — pure NetworkX/pyproj
   operations on an in-memory graph, no IO. Unit-testable with hand-built graphs.
@@ -60,7 +61,14 @@ def fetch_raw_graph(
     Returned graph carries ``graph.graph['crs'] = 'EPSG:4326'`` and edges already
     have ``length`` in metres (OSMnx computes great-circle lengths on fetch).
     Transient Overpass failures are retried with backoff (:mod:`segx.network.retry`).
+    With ``network.osm_pbf_url`` set, the graph is read from that local extract
+    instead (:mod:`segx.network.pbf`) and Overpass is never contacted.
     """
+    if settings.network.osm_pbf_url is not None:
+        from segx.network.pbf import graph_from_pbf
+
+        return graph_from_pbf(settings.network.osm_pbf_url, bbox_wgs84, network_type, settings, cancel=cancel)
+
     import osmnx as ox
 
     minx, miny, maxx, maxy = bbox_wgs84
@@ -249,6 +257,16 @@ def build_mode_graph(
 # --------------------------------------------------------------------------- #
 
 
+def osm_source(settings: Settings) -> str | None:
+    """Cache-key token for where OSM data comes from: ``None`` = live Overpass,
+    else the local extract's identity (:func:`segx.network.pbf.source_id`)."""
+    if settings.network.osm_pbf_url is None:
+        return None
+    from segx.network.pbf import source_id
+
+    return source_id(settings.network.osm_pbf_url)
+
+
 def load_or_fetch_graph(
     boundary: LoadedBoundary,
     mode: str,
@@ -274,13 +292,15 @@ def load_or_fetch_graph(
     if mode == "transit":
         return _build_transit_mode(boundary, settings, cache_dir, cancel=cancel)
 
-    key = cache_key(boundary.bbox_wgs84, settings.network.osm_snapshot_date, mode)
+    source = osm_source(settings)
+    key = cache_key(boundary.bbox_wgs84, settings.network.osm_snapshot_date, mode, source=source)
     entry = cache_entry(cache_dir, key)
 
     if entry.exists:
         raw = read_graph(entry)
     else:
-        if settings.network.osm_snapshot_date is None:
+        # A local extract is a fixed snapshot: reproducible without a pinned date.
+        if settings.network.osm_snapshot_date is None and source is None:
             warnings.warn(
                 "network.osm_snapshot_date is not pinned — this run will fetch the current "
                 "live OSM state and the result will not be reproducible. Set "
@@ -295,6 +315,7 @@ def load_or_fetch_graph(
             bbox=boundary.bbox_wgs84,
             snapshot_date=settings.network.osm_snapshot_date,
             network_type=mode,
+            source=source,
         )
 
     return build_mode_graph(raw, mode, settings, working_crs=boundary.crs)
@@ -338,6 +359,7 @@ __all__ = [
     "build_mode_graph",
     "fetch_raw_graph",
     "load_or_fetch_graph",
+    "osm_source",
     "parse_maxspeed_kmh",
     "project_graph",
     "to_undirected_graph",

@@ -434,7 +434,10 @@ class NetworkConfig(BaseModel):
     drive_speed_fallback_kmh: float = 30.0
     # Pin these for reproducible academic results.
     osm_snapshot_date: str | None = None  # e.g. "2026-05-01"; None = "now" (warned)
-    osm_pbf_url: str | None = None  # if set, QuackOSM reads this PBF instead of live download
+    # Local .osm.pbf extract (Geofabrik / BBBike). When set, street graphs are read
+    # from it (segx.network.pbf) instead of Overpass, and the POI fetcher
+    # "quackosm" reads POIs from it. Its header date stands in for osm_snapshot_date.
+    osm_pbf_url: str | None = None
     simplify: bool = True
     # User's choice of directed vs. undirected street graph.
     # When ``True`` each per-mode graph is collapsed to undirected at build time so

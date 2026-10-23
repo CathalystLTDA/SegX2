@@ -200,6 +200,18 @@ class POIFetchError(NetworkError, RuntimeError):
     code = "network.poi_fetch"
 
 
+class OSMExtractError(NetworkError, ValueError):
+    """A local OpenStreetMap extract (``network.osm_pbf_url``) cannot serve the run.
+
+    Raised when the ``.osm.pbf`` file does not cover the study area — its header
+    bounding box misses part of the boundary, or it holds no street at all inside
+    it. Never retryable: the same file gives the same answer; the user needs an
+    extract of the right region.
+    """
+
+    code = "network.osm_extract"
+
+
 # --------------------------------------------------------------------------- #
 # Public transport (P7)                                                        #
 # --------------------------------------------------------------------------- #
@@ -275,6 +287,7 @@ __all__ = [
     "ModeNotAvailableError",
     "ModeNotRegisteredError",
     "NetworkError",
+    "OSMExtractError",
     "OSMFetchError",
     "OperationCancelled",
     "OutputColumnCollisionError",

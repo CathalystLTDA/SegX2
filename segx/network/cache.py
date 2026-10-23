@@ -97,13 +97,19 @@ def cache_key(
     bbox: tuple[float, float, float, float],
     snapshot_date: str | None,
     network_type: str,
+    *,
+    source: str | None = None,
 ) -> str:
-    """Deterministic 16-char hex digest of ``(bbox, snapshot_date, network_type)``."""
+    """Deterministic 16-char hex digest of ``(bbox, snapshot_date, network_type)``.
+
+    ``source`` names a local OSM extract (``None`` = live Overpass); it only
+    enters the payload when set, so existing Overpass entries keep their keys.
+    """
     rounded = [round(c, _BBOX_ROUND_DECIMALS) for c in bbox]
-    payload = json.dumps(
-        {"bbox": rounded, "snapshot_date": snapshot_date, "network_type": network_type},
-        sort_keys=True,
-    )
+    fields: dict[str, object] = {"bbox": rounded, "snapshot_date": snapshot_date, "network_type": network_type}
+    if source is not None:
+        fields["source"] = source
+    payload = json.dumps(fields, sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
@@ -132,6 +138,7 @@ def write_graph(
     bbox: tuple[float, float, float, float],
     snapshot_date: str | None,
     network_type: str,
+    source: str | None = None,
 ) -> None:
     """Serialise *graph* as GeoParquet + manifest at *entry*.
 
@@ -150,6 +157,7 @@ def write_graph(
         "bbox": list(bbox),
         "snapshot_date": snapshot_date,
         "network_type": network_type,
+        "source": source or "overpass",
         "node_count": int(len(nodes)),
         "edge_count": int(len(edges)),
         "json_columns": {"nodes": nodes_json_cols, "edges": edges_json_cols},

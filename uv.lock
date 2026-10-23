@@ -592,6 +592,23 @@ wheels = [
 ]
 
 [[package]]
+name = "osmium"
+version = "4.3.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a6/33/c7cb6aa530b887370c6b8d91660d327758562f5dc8dd19d744aea0c74d45/osmium-4.3.2.tar.gz", hash = "sha256:bea7aa809d41659ad29c7b4627ce7e1af4d420d03db45b3a4211cb6192b6926f", size = 540558, upload-time = "2026-10-18T19:24:35.996Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7b/11/92b1a9668e0e53e42132d067551113e4ca721a354969b90947da917b730b/osmium-4.3.2-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:e617626395c57043fad7d83c0c4ecc0a5d592772bb28691ef91199b8da689bd0", size = 1312716, upload-time = "2026-10-18T19:22:05.957Z" },
+    { url = "https://files.pythonhosted.org/packages/cd/64/be6638342c1af39943f4a750577522b081dca0ee06541155d4bc4302864f/osmium-4.3.2-cp311-cp311-macosx_11_0_x86_64.whl", hash = "sha256:2875b6deea282f58d94a508194dc6e6c7dc96881670adf45be1e943e7361d2b4", size = 1465893, upload-time = "2026-10-18T19:22:08.913Z" },
+    { url = "https://files.pythonhosted.org/packages/74/e7/dd160a096c3f02519b30483de547e44df604afc3d1c9339d6c86d8902c9b/osmium-4.3.2-cp311-cp311-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:1c45037a8fd04fcc8481387853d411d3a1e1c93b7c6da7be201159c4a2526134", size = 1721783, upload-time = "2026-10-18T19:22:11.888Z" },
+    { url = "https://files.pythonhosted.org/packages/df/b1/b3b5f7da3f16a3de6758f85ab07921e0602ee90429fe8323d32b186b33b8/osmium-4.3.2-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:f25c85085f4b2b26b10a430944112e2e1bf07e861fedac02079beb74af835622", size = 1866450, upload-time = "2026-10-18T19:22:14.86Z" },
+    { url = "https://files.pythonhosted.org/packages/e0/4c/468cfae53425f8bf292925a5d5bbc284b30a4043d318d3e8e3d03e30dc0d/osmium-4.3.2-cp311-cp311-win_amd64.whl", hash = "sha256:68bf87c64c2ac79d8db4358dda283b0ac03e3e054adc5120b9bc8b0f91bbfb80", size = 1903322, upload-time = "2026-10-18T19:22:18.365Z" },
+    { url = "https://files.pythonhosted.org/packages/85/40/2c42ed2844cffb31354b7377a5bee7acd6c7555d7e3a896f451ca3fba406/osmium-4.3.2-cp311-cp311-win_arm64.whl", hash = "sha256:369dd4f1f6ad1cd141ae843cdb534201ebe14a0c14a58b3449747bddb5e895aa", size = 2052791, upload-time = "2026-10-18T19:22:22.105Z" },
+]
+
+[[package]]
 name = "osmnx"
 version = "2.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1116,6 +1133,7 @@ dependencies = [
     { name = "networkx" },
     { name = "numpy" },
     { name = "openpyxl" },
+    { name = "osmium" },
     { name = "osmnx" },
     { name = "pandana" },
     { name = "pandas" },
@@ -1147,6 +1165,7 @@ requires-dist = [
     { name = "networkx", specifier = ">=3.2" },
     { name = "numpy", specifier = ">=1.26,<2" },
     { name = "openpyxl", specifier = ">=3.1" },
+    { name = "osmium", specifier = ">=4.0" },
     { name = "osmnx", specifier = ">=2.0" },
     { name = "pandana", specifier = ">=0.7" },
     { name = "pandas", specifier = ">=2.2,<3" },
