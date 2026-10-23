@@ -17,6 +17,7 @@ from segx.config import (
     CatchmentBindingConfig,
     DemographicAttribute,
     DemographicSchema,
+    FiguresConfig,
     NearestBindingConfig,
     NetworkConfig,
     POIBindingConfig,
@@ -163,8 +164,50 @@ def test_run_pipeline_runs_end_to_end_and_writes_the_deliverables(tmp_path) -> N
     # and the P8 writers all run; the NetworkX oracle keeps it light (Pandana is
     # exercised by the integration test).
     settings = _settings(tmp_path).model_copy(
-        update={"network": NetworkConfig(modes=["walk"]), "routing": RoutingConfig(engine="networkx")}
+        update={
+            "network": NetworkConfig(modes=["walk"]),
+            "routing": RoutingConfig(engine="networkx"),
+            "figures": FiguresConfig(basemap=False, dpi=50),  # no web tiles in tests
+        }
     )
+    result, stages = _run_end_to_end(settings, tmp_path)
+
+    assert stages[-1] == "render_figures"
+    assert stages.index("write_outputs") < stages.index("render_figures")
+    assert result.outputs.segments_path == tmp_path / "out" / "segments.gpkg"
+    assert result.outputs.segments_path.exists() and result.outputs.workbook_path.exists()
+    assert result.outputs.stats["n_segment_rows"] == result.aggregation.stats["n_segments"]
+    # the figures stage is wired: it ran, failed nothing, stayed offline. This
+    # city routes zero-length paths, so there are no segments to draw — the
+    # figures themselves are covered in test_figures.py on the synthetic grid.
+    figures = result.figures
+    assert figures is not None and figures.failed == [] and figures.basemap == "off"
+    assert figures.root == tmp_path / "out"
+    assert "overview.png" in figures.files["maps"]
+    assert (tmp_path / "out" / "maps" / "overview.png").is_file()
+    assert {a["kind"] for a in figures.artifacts()} <= {
+        "figures:maps",
+        "figures:segments",
+        "figures:charts",
+        "figures:tables",
+    }
+
+
+def test_run_pipeline_without_figures_ends_at_write_outputs(tmp_path) -> None:
+    settings = _settings(tmp_path).model_copy(
+        update={
+            "network": NetworkConfig(modes=["walk"]),
+            "routing": RoutingConfig(engine="networkx"),
+            "figures": FiguresConfig(enabled=False),
+        }
+    )
+    result, stages = _run_end_to_end(settings, tmp_path)
+    assert stages[-1] == "write_outputs"
+    assert result.figures is None
+    assert not (tmp_path / "out" / "maps").exists()
+
+
+def _run_end_to_end(settings, tmp_path):
     boundary_file = tmp_path / "boundary.gpkg"
     demo_file = tmp_path / "demo.gpkg"
     _write_boundary(boundary_file)
@@ -181,11 +224,7 @@ def test_run_pipeline_runs_end_to_end_and_writes_the_deliverables(tmp_path) -> N
         output_dir=tmp_path / "out",
         progress=lambda ev: stages.append(ev.stage),
     )
-
-    assert stages[-1] == "write_outputs"
-    assert result.outputs.segments_path == tmp_path / "out" / "segments.gpkg"
-    assert result.outputs.segments_path.exists() and result.outputs.workbook_path.exists()
-    assert result.outputs.stats["n_segment_rows"] == result.aggregation.stats["n_segments"]
+    return result, stages
 
 
 def test_build_population_centroid_origins(tmp_path) -> None:

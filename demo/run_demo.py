@@ -647,7 +647,8 @@ _basemap = {"checked": False, "cx": None}
 def _add_basemap(ax, crs) -> None:
     """Draw a dark city basemap (streets + building footprints) behind the data.
 
-    Uses contextily's CartoDB DarkMatter tiles, reprojected to the working CRS so
+    Uses Esri's Dark Gray Canvas tiles (the engine's ``segx.figures`` basemap;
+    CartoDB DarkMatter now needs an API key), reprojected to the working CRS so
     they line up with the routes drawn in projected metres. Call it *after* the
     data is plotted (contextily reads the axis extent). Degrades gracefully:
     skipped if contextily is missing or tiles can't be fetched (e.g. offline) —
@@ -667,7 +668,9 @@ def _add_basemap(ax, crs) -> None:
     if cx is None:
         return
     try:
-        cx.add_basemap(ax, crs=str(crs), source=cx.providers.CartoDB.DarkMatter, attribution_size=5, zorder=0)
+        from segx.figures import basemap_provider
+
+        cx.add_basemap(ax, crs=str(crs), source=basemap_provider(), attribution_size=5, zorder=0)
     except Exception as exc:  # tile fetch / network errors must not kill the demo
         print(f"  (basemap skipped — {exc})")
 

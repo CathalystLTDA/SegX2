@@ -344,11 +344,13 @@ def _describe() -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 
-def _planned_stages(has_od: bool) -> list[str]:
+def _planned_stages(has_od: bool, figures: bool = True) -> list[str]:
     """The ordered stages this run will actually execute (for a global % bar)."""
     out = []
     for stage in PIPELINE_STAGES:
         if stage in _OD_ONLY_STAGES and not has_od:
+            continue
+        if stage == "render_figures" and not figures:
             continue
         out.append(stage)
     return out
@@ -451,7 +453,10 @@ def _assemble_result(settings: Settings, run: RunResult) -> dict[str, Any]:
             if k != "settings_json"
         },
         "write_stats": run.outputs.stats,
-        "artifacts": run.outputs.artifacts(),
+        "artifacts": run.outputs.artifacts() + (run.figures.artifacts() if run.figures is not None else []),
+        "figures": (
+            {"basemap": run.figures.basemap, "failed": run.figures.failed} if run.figures is not None else None
+        ),
     }
 
 
@@ -499,6 +504,9 @@ def _execute(run_id: Any, params: dict[str, Any], cancel_event: threading.Event)
             dir_updates["cache_dir"] = Path(params["cache_dir"])
         if dir_updates:
             settings = settings.model_copy(update=dir_updates)
+        # Now that the settings are known: the figures stage runs only when enabled.
+        planned = _planned_stages(has_od=od_path is not None, figures=settings.figures.enabled)
+        total = len(planned)
 
         boundary_path = params["boundary_path"]
         demographics_path = params["demographics_path"]

@@ -232,12 +232,13 @@ export interface DiversityStat {
   max: number;
 }
 
-/** One file the P8 writers produced. */
+/** One file the P8 writers produced, or one folder of figures. */
 export interface Artifact {
   kind: string;
   path: string;
   layers?: string[];
   sheets?: string[];
+  files?: string[];
 }
 
 export interface WriteStats {
@@ -259,6 +260,7 @@ export interface RunResult {
   provenance: Record<string, unknown>;
   write_stats: WriteStats;
   artifacts: Artifact[];
+  figures: unknown | null;
 }
 
 export interface InspectLayerParams {

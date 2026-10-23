@@ -17,6 +17,7 @@ calls :func:`run_pipeline`.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,6 +51,7 @@ if TYPE_CHECKING:  # pragma: no cover
 
     from segx.aggregation.edge_accumulator import DemoVector
     from segx.config import Settings
+    from segx.figures import RenderedFigures
     from segx.progress import CancelCheck, ProgressCallback
     from segx.routing.engine import RoutingEngine
     from segx.routing.trajectories import Trajectory
@@ -104,6 +106,7 @@ PIPELINE_STAGES: tuple[str, ...] = (
     "compute_metrics",  # metrics.registry: entropy (P4) + segregation metrics (P5)
     "check_invariants",  # validation.invariants  (P4)
     "write_outputs",  # io.writers: segments.gpkg + metrics.xlsx  (P8)
+    "render_figures",  # figures: maps/, segments/, charts/, tables/  (skipped if figures.enabled is off)
 )
 
 
@@ -823,6 +826,7 @@ class RunResult:
     aggregation: AggregationResult
     od_spread: object | None
     outputs: WrittenOutputs
+    figures: RenderedFigures | None = None  # None when figures.enabled is off
 
     @property
     def stats(self) -> dict:
@@ -871,7 +875,7 @@ def run_pipeline(
         progress=progress,
         cancel=cancel,
     )
-    return RunResult(
+    run = RunResult(
         state=state,
         population=population,
         routing=routing,
@@ -879,6 +883,12 @@ def run_pipeline(
         od_spread=od_spread,
         outputs=outputs,
     )
+    if not settings.figures.enabled:
+        return run
+    from segx.figures import render_figures
+
+    figures = render_figures(run, settings, outputs.output_dir, cache_dir=cache_dir, progress=progress, cancel=cancel)
+    return dataclasses.replace(run, figures=figures)
 
 
 __all__ = [

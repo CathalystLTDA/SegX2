@@ -293,12 +293,27 @@ class DiversityStat(TypedDict):
 
 
 class Artifact(TypedDict):
-    """One file the P8 writers produced."""
+    """One file the P8 writers produced, or one folder of figures."""
 
-    kind: str  # "segments" (GeoPackage) | "metrics" (XLSX) | "table" (CSV)
+    # "segments" (GeoPackage) | "metrics" (XLSX) | "table" (CSV) |
+    # "figures:maps" | "figures:segments" | "figures:charts" | "figures:tables" (folders)
+    kind: str
     path: str
     layers: NotRequired[list[str]]  # kind == "segments": the line layers
     sheets: NotRequired[list[str]]  # kind == "metrics": the sheets, in order
+    files: NotRequired[list[str]]  # kind == "figures:*": files in the folder, relative to it
+
+
+class FigureFailure(TypedDict):
+    file: str  # "segments/od-commute/diversity_sex.png"
+    error: str
+
+
+class FiguresSummary(TypedDict):
+    """How the render_figures stage went (figures are derived: failures do not fail the run)."""
+
+    basemap: Literal["on", "off", "unavailable"]
+    failed: list[FigureFailure]
 
 
 class WriteStats(TypedDict):
@@ -322,6 +337,7 @@ class RunResult(TypedDict):
     provenance: dict[str, Any]  # the stamp written into both files, minus the settings dump
     write_stats: WriteStats
     artifacts: list[Artifact]
+    figures: FiguresSummary | None  # None when figures.enabled is off
 
 
 # --------------------------------------------------------------------------- #

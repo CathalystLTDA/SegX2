@@ -47,6 +47,11 @@ dependencies = [
     "typer>=0.12",
     "openpyxl>=3.1",
     "osmium>=4.0",
+    # --- figures (segx.figures: maps / segment maps / charts per run) ---
+    # matplotlib renders headless (Agg); contextily draws the optional dark web-tile
+    # basemap (figures.basemap) and degrades to no basemap when offline.
+    "matplotlib>=3.8",
+    "contextily>=1.6",
 ]
 
 [project.scripts]
@@ -61,14 +66,12 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.6",
 ]
-# Optional extras used only by the demo runner in `demo/` (map rendering). Not
-# needed by the engine itself. Install with: uv sync --group demo
+# Extras for the demo runner in `demo/`. Install with: uv sync --group demo
+# matplotlib and contextily are core dependencies now (segx.figures); the group is
+# kept so `uv sync --group demo` keeps working. The demo's --no-basemap and the
+# engine's figures.basemap=false both skip the web tiles.
 demo = [
     "matplotlib>=3.8",
-    # contextily adds the dark city basemap (streets + building footprints) behind
-    # the demo maps, reprojected to the working CRS. Demo-only; the engine never
-    # touches web tiles. Tiles are fetched live (contextily caches them); use
-    # --no-basemap for an offline run.
     "contextily>=1.6",
 ]
 

@@ -1016,6 +1016,27 @@ class ODSpreadConfig(BaseModel):
     )
 
 
+class FiguresConfig(BaseModel):
+    """The figures a run draws after writing its data files (:mod:`segx.figures`).
+
+    Maps, per-segment metric maps, charts and CSV tables — the renderers of the
+    engine demo, generalised to any attribute and binding — under ``maps/``,
+    ``segments/``, ``charts/`` and ``tables/`` in the run's output folder. They are
+    derived output: a figure that fails to draw is logged and skipped, never fails
+    the run.
+    """
+
+    enabled: bool = True
+    # Dark web-tile basemap (Esri Dark Gray Canvas via contextily) behind every map.
+    # Needs internet on the first draw of an area (tiles are cached under
+    # cache_dir/tiles); without it the maps render on a plain dark background.
+    basemap: bool = True
+    dpi: int = Field(default=150, ge=50, le=600)
+    # Route maps draw at most this many trajectories (a seeded random sample,
+    # stated in the title) — a city-wide catchment holds millions of paths.
+    max_routes: int = Field(default=20_000, ge=1)
+
+
 class AnalysisConfig(BaseModel):
     """Analyses of the **inputs**, as opposed to :class:`MetricsConfig`'s plugins
     over the routed edge table.
@@ -1046,6 +1067,7 @@ class Settings(BaseModel):
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
+    figures: FiguresConfig = Field(default_factory=FiguresConfig)
 
     cache_dir: Path = Path("cache")
     output_dir: Path = Path("out")
