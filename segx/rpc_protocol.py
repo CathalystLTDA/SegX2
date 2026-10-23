@@ -354,6 +354,9 @@ class InspectLayerResult(TypedDict):
     driver: str
     columns: list[ColumnInfo]
     geometry_column: str | None  # the name the loaders see ("geometry"); None for TABLE
+    # OSM extracts (.osm.pbf) only: the header's snapshot date ("2026-10-20"); the
+    # file is not counted (feature_count 0) and bbox is the header's coverage box.
+    snapshot_date: NotRequired[str | None]
 
 
 class LayerPreviewParams(TypedDict):

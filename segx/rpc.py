@@ -325,6 +325,9 @@ def _describe() -> dict[str, Any]:
             "boundary": {"required": True, "formats": ["gpkg", "shp", "geojson"]},
             "demographics": {"required": True, "formats": ["gpkg", "shp", "geojson", "csv"]},
             "od_pairs": {"required": False, "formats": ["csv", "gpkg"]},
+            # A local OSM extract: when given, the app sends it as network.osm_pbf_url and
+            # streets + POIs are read from it instead of Overpass.
+            "osm_extract": {"required": False, "formats": ["pbf"]},
         },
         "invariants": [
             "one enforced working CRS (UTM of the boundary); nothing downstream touches lat/lon",

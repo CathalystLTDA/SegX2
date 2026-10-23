@@ -281,6 +281,7 @@ export interface InspectLayerResult {
   driver: string;
   columns: ColumnInfo[];
   geometry_column: string | null;
+  snapshot_date?: string | null;
 }
 
 export interface LayerPreviewParams {

@@ -10,6 +10,9 @@ methods, so the desktop app needs no GDAL of its own:
 * :func:`layer_preview` — the first ``max_features`` features as lightweight
   WGS84 GeoJSON for drawing a preview map.
 
+An OSM extract (``.osm.pbf``) is answered from its header alone — its coverage
+box and snapshot date — since reading its features means reading the file.
+
 Neither feeds the pipeline: a run always re-reads its inputs through the real
 loaders (``io.boundary``, ``io.demographics``, …). A layer without a CRS is
 reported as ``crs = None`` and *displayed* as if it were WGS84 — the same
@@ -25,6 +28,7 @@ from typing import Any
 import pyogrio
 from pyogrio.errors import DataLayerError, DataSourceError
 from pyproj import CRS, Transformer
+from shapely.geometry import box as shapely_box
 
 from segx.errors import InputError, InputFileNotFoundError
 
@@ -127,8 +131,49 @@ def _columns(path: str | Path, info: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def _is_osm_extract(path: str | Path) -> bool:
+    return Path(path).suffix.lower() == ".pbf"
+
+
+def _inspect_osm_extract(path: str | Path) -> dict[str, Any]:
+    """An ``.osm.pbf`` is read from its header only: counting its features (or
+    letting pyogrio's OSM driver do it) would read the whole file."""
+    from segx.network.pbf import read_header
+
+    header = read_header(path)
+    return {
+        "crs": "EPSG:4326",
+        "feature_count": 0,
+        "geometry_type": "POLYGON",
+        "bbox": list(header.bbox_wgs84) if header.bbox_wgs84 is not None else None,
+        "driver": "OSM PBF",
+        "columns": [],
+        "geometry_column": None,
+        "snapshot_date": header.timestamp,
+    }
+
+
+def _preview_osm_extract(path: str | Path) -> dict[str, Any]:
+    """The extract's coverage box, so the map shows whether it contains the area."""
+    from segx.network.pbf import read_header
+
+    header = read_header(path)
+    features = []
+    if header.bbox_wgs84 is not None:
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": shapely_box(*header.bbox_wgs84).__geo_interface__,
+                "properties": {"name": Path(path).name, "snapshot_date": header.timestamp},
+            }
+        )
+    return {"geometry_type": "POLYGON", "total_features": len(features), "features": features}
+
+
 def inspect_layer(path: str | Path) -> dict[str, Any]:
     """Header facts about one input layer, without loading its geometry."""
+    if _is_osm_extract(path):
+        return _inspect_osm_extract(path)
     info = _info(path)
     kind = _geometry_kind(info.get("geometry_type"))
     return {
@@ -199,6 +244,8 @@ def _scalar(value: Any) -> str | float | None:
 
 def layer_preview(path: str | Path, max_features: int = 1000) -> dict[str, Any]:
     """The first ``max_features`` features of a layer as simplified WGS84 GeoJSON."""
+    if _is_osm_extract(path):
+        return _preview_osm_extract(path)
     info = _info(path)
     kind = _geometry_kind(info.get("geometry_type"))
     result: dict[str, Any] = {

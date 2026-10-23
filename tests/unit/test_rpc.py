@@ -362,3 +362,56 @@ def test_describe_documents_every_registered_metric():
         assert m["formula"].strip(), m["name"]
     diversity = next(m for m in registered if m["name"] == "diversity")
     assert diversity["formula"].startswith("D(s) = ")
+
+
+# --------------------------------------------------------------------------- #
+# OSM extracts (.osm.pbf): answered from the header                            #
+# --------------------------------------------------------------------------- #
+
+
+def _extract(tmp_path, *, box=(-52.0, -31.0, -50.0, -29.0)):
+    import osmium
+
+    header = osmium.io.Header()
+    if box is not None:
+        header.add_box(osmium.osm.Box(osmium.osm.Location(box[0], box[1]), osmium.osm.Location(box[2], box[3])))
+    header.set("osmosis_replication_timestamp", "2026-10-20T20:23:47Z")
+    path = tmp_path / "sul.osm.pbf"
+    writer = osmium.SimpleWriter(str(path), header=header)
+    writer.add_node(osmium.osm.mutable.Node(id=1, location=(-51.2, -30.0)))
+    writer.close()
+    return path
+
+
+def test_inspect_osm_extract_reports_header_box_and_date(tmp_path):
+    info = inspect_layer(_extract(tmp_path))
+    assert info["driver"] == "OSM PBF"
+    assert info["crs"] == "EPSG:4326"
+    assert info["bbox"] == pytest.approx([-52.0, -31.0, -50.0, -29.0])
+    assert info["snapshot_date"] == "2026-10-20"
+    assert info["feature_count"] == 0 and info["columns"] == []
+
+
+def test_preview_osm_extract_is_its_coverage_box(tmp_path):
+    preview = layer_preview(_extract(tmp_path))
+    assert preview["total_features"] == 1
+    feature = preview["features"][0]
+    assert feature["geometry"]["type"] == "Polygon"
+    assert feature["properties"] == {"name": "sul.osm.pbf", "snapshot_date": "2026-10-20"}
+
+
+def test_preview_osm_extract_without_box_has_no_features(tmp_path):
+    assert layer_preview(_extract(tmp_path, box=None))["features"] == []
+
+
+def test_inspect_unreadable_osm_extract_raises_input_error(tmp_path):
+    path = tmp_path / "broken.osm.pbf"
+    path.write_bytes(b"not a pbf at all" * 10)
+    with pytest.raises(InputError) as exc:
+        inspect_layer(path)
+    assert exc.value.code == "input.invalid"
+
+
+def test_describe_offers_the_osm_extract_layer():
+    layers = rpc._describe()["input_layers"]
+    assert layers["osm_extract"] == {"required": False, "formats": ["pbf"]}

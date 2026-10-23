@@ -32,7 +32,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from segx.errors import InputFileNotFoundError, OSMExtractError
+from segx.errors import InputError, InputFileNotFoundError, OSMExtractError
 from segx.progress import check_cancel
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -130,14 +130,25 @@ def read_header(pbf: str | Path) -> PBFHeader:
     """The bounding box and snapshot date stored in the file header (cheap)."""
     import osmium
 
-    reader = osmium.io.Reader(str(_pbf_path(pbf)), osmium.osm.osm_entity_bits.NOTHING)
+    path = _pbf_path(pbf)
     try:
-        header = reader.header()
-        box = header.box()
-        bbox = (box.bottom_left.lon, box.bottom_left.lat, box.top_right.lon, box.top_right.lat) if box.valid() else None
-        stamp = header.get("osmosis_replication_timestamp") or header.get("timestamp")
-    finally:
-        reader.close()
+        reader = osmium.io.Reader(str(path), osmium.osm.osm_entity_bits.NOTHING)
+        try:
+            header = reader.header()
+            box = header.box()
+            bbox = (
+                (box.bottom_left.lon, box.bottom_left.lat, box.top_right.lon, box.top_right.lat)
+                if box.valid()
+                else None
+            )
+            stamp = header.get("osmosis_replication_timestamp") or header.get("timestamp")
+        finally:
+            reader.close()
+    except RuntimeError as exc:  # libosmium: not a PBF, truncated, unknown format
+        raise InputError(
+            f"cannot read OpenStreetMap extract: {path}: {exc}",
+            details={"path": str(path), "setting": "network.osm_pbf_url"},
+        ) from exc
     timestamp = None
     if stamp:
         try:
