@@ -219,3 +219,12 @@ def test_cache_key_separates_pbf_from_overpass(grid_pbf) -> None:
     legacy = cache_key(_AREA, None, "walk")
     assert cache_key(_AREA, None, "walk", source=None) == legacy
     assert cache_key(_AREA, None, "walk", source=source) != legacy
+
+
+def test_snapshot_date_comes_from_the_pbf_unless_pinned(grid_pbf) -> None:
+    from segx.network.builder import osm_snapshot_date
+
+    assert osm_snapshot_date(_settings(grid_pbf)) == "2026-10-20"
+    pinned = Settings(network=NetworkConfig(osm_pbf_url=str(grid_pbf), osm_snapshot_date="2026-01-01"))
+    assert osm_snapshot_date(pinned) == "2026-01-01"
+    assert osm_snapshot_date(_settings()) is None

@@ -32,7 +32,8 @@ Methods:
                       ``boundary_path``, ``demographics_path``, optional
                       ``od_pairs_path``, ``config_path``, ``overrides``
                       (dotted-key map), ``output_dir``, ``cache_dir``,
-                      ``poi_fetcher``.
+                      ``poi_fetcher`` (``"auto"`` default: QuackOSM when
+                      ``network.osm_pbf_url`` is set, else OSMnx/Overpass).
 * ``cancel``        — set the cancel flag for a running ``runId`` (the
                       ``run_pipeline`` request ``id``); the run unwinds via
                       :class:`~segx.errors.OperationCancelled` and returns a
@@ -60,6 +61,7 @@ import contextlib
 import json
 import logging
 import math
+import multiprocessing
 import os
 import sys
 import threading
@@ -78,6 +80,7 @@ from segx.io.demographics import class_columns_for
 from segx.io.inspect import inspect_layer, layer_preview, od_modes
 from segx.io.writers import build_provenance
 from segx.metrics.registry import available_metrics, get_metric
+from segx.network.builder import osm_snapshot_date
 from segx.orchestrator import PIPELINE_STAGES, RunResult, run_pipeline
 from segx.progress import ProgressEvent
 
@@ -402,7 +405,7 @@ def _assemble_result(settings: Settings, run: RunResult) -> dict[str, Any]:
 
     return {
         "crs": state.boundary.crs,
-        "snapshot_date": settings.network.osm_snapshot_date,
+        "snapshot_date": osm_snapshot_date(settings),
         "phase": "P8",
         "counts": {
             "demographic_rows": int(len(state.demographics.gdf)),
@@ -497,7 +500,7 @@ def _execute(run_id: Any, params: dict[str, Any], cancel_event: threading.Event)
         boundary_path = params["boundary_path"]
         demographics_path = params["demographics_path"]
         cache_dir = Path(params["cache_dir"]) if params.get("cache_dir") else settings.cache_dir
-        poi_fetcher = params.get("poi_fetcher", "osmnx")
+        poi_fetcher = params.get("poi_fetcher", "auto")
 
         run = run_pipeline(
             settings,
@@ -552,6 +555,9 @@ def _stdin_lines() -> Iterator[str]:
 
 def serve() -> None:
     """Read requests from stdin until EOF or ``shutdown``; dispatch each one."""
+    # QuackOSM (POIs from a local PBF) spawns worker processes; in the frozen
+    # PyInstaller binary each worker re-enters here and must not start a server.
+    multiprocessing.freeze_support()
     _configure_stdio()
     _claim_stdout()  # native libraries must not write into the protocol channel
     _claim_stdin()  # ...nor block on the protocol input while their DLLs load

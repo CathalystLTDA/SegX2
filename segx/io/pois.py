@@ -3,10 +3,11 @@ cache as GeoParquet, return one tidy GeoDataFrame the dual binding consumes.
 
 Three concerns, separated:
 
-* **Tag presets → features (per category).** :func:`fetch_pois_quackosm` reads a
-  PBF via QuackOSM (the contract default); :func:`fetch_pois_osmnx` uses the
-  Overpass API as a fallback when no PBF is available. Both are "live"
-  operations — covered by P3+ integration tests, not unit tests.
+* **Tag presets → features (per category).** :func:`fetch_pois_quackosm` reads
+  the local PBF at ``network.osm_pbf_url`` via QuackOSM (one read for every
+  category); :func:`fetch_pois_osmnx` uses the Overpass API when no PBF is
+  set. :func:`load_pois` picks between them (``fetcher="auto"``). Overpass is
+  mocked in unit tests; QuackOSM runs for real on a tiny PBF.
 * **In-memory normalisation.** :func:`build_pois_gdf` takes a ``{category:
   GeoDataFrame}`` dict and produces the canonical ``[category, osm_id,
   geometry, tags]`` table — pure data manipulation, unit-testable.
@@ -84,16 +85,22 @@ def pois_cache_key(
     bbox: tuple[float, float, float, float],
     snapshot_date: str | None,
     categories: list[str],
+    *,
+    source: str | None = None,
 ) -> str:
-    """Deterministic 16-char hex digest. Different category sets → different keys."""
-    payload = json.dumps(
-        {
-            "bbox": [round(c, _BBOX_ROUND_DECIMALS) for c in bbox],
-            "snapshot_date": snapshot_date,
-            "categories": sorted(categories),
-        },
-        sort_keys=True,
-    )
+    """Deterministic 16-char hex digest. Different category sets → different keys.
+
+    ``source`` names a local OSM extract (``None`` = live Overpass), as in
+    :func:`segx.network.cache.cache_key`; only set keys change.
+    """
+    fields: dict[str, object] = {
+        "bbox": [round(c, _BBOX_ROUND_DECIMALS) for c in bbox],
+        "snapshot_date": snapshot_date,
+        "categories": sorted(categories),
+    }
+    if source is not None:
+        fields["source"] = source
+    payload = json.dumps(fields, sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
@@ -253,26 +260,100 @@ def fetch_pois_osmnx(
 def fetch_pois_quackosm(
     boundary: LoadedBoundary,
     settings: Settings,
+    *,
+    cache_dir: Path | None = None,
+    cancel: CancelCheck | None = None,
 ) -> dict[str, gpd.GeoDataFrame]:
-    """Live POI fetch via QuackOSM from the PBF at ``network.osm_pbf_url``.
+    """POI extraction via QuackOSM from the local PBF at ``network.osm_pbf_url``.
 
-    Requires ``settings.network.osm_pbf_url`` to point to a local PBF or HTTPS URL.
+    One read for every category: the presets go in as a QuackOSM *grouped* tag
+    filter (``{category: tags}``), which returns one column per category holding
+    the matched ``key=value`` (``None`` where the feature is not in it). A
+    feature matching several categories lands in each. QuackOSM keeps its
+    intermediate files under ``cache_dir / "quackosm"`` (its default would be a
+    ``files/`` folder in the current directory) and runs silent, since it would
+    otherwise draw progress bars on the console.
+
+    Not cancellable mid-read (QuackOSM runs it in DuckDB and worker processes);
+    cancellation is checked before and after.
     """
-    if settings.network.osm_pbf_url is None:
+    from segx.errors import InputFileNotFoundError
+    from segx.network.pbf import read_header
+    from segx.progress import check_cancel
+
+    pbf_path = settings.network.osm_pbf_url
+    if pbf_path is None:
         raise ConfigValueError(
             "fetch_pois_quackosm requires `network.osm_pbf_url` to be set; "
-            "either configure one or use fetch_pois_osmnx."
+            "either configure one or use fetch_pois_osmnx.",
+            details={"setting": "network.osm_pbf_url"},
         )
-    from quackosm import convert_geometry_to_geodataframe
+    if not Path(pbf_path).is_file():
+        raise InputFileNotFoundError(
+            f"OpenStreetMap extract not found: {pbf_path}",
+            details={"path": str(pbf_path), "setting": "network.osm_pbf_url"},
+        )
+    from quackosm import convert_pbf_to_geodataframe
 
+    categories = settings.poi.categories_for("nearest")
+    if not categories:
+        return {}
     wgs_boundary = gpd.GeoSeries([boundary.geometry], crs=boundary.crs).to_crs(settings.crs.geographic_crs).iloc[0]
+    _check_pbf_covers(read_header(pbf_path).bbox_wgs84, boundary.bbox_wgs84, pbf_path)
+    check_cancel(cancel, stage="load_pois")
+    gdf = convert_pbf_to_geodataframe(
+        pbf_path,
+        tags_filter={category: settings.poi.presets[category] for category in categories},
+        geometry_filter=wgs_boundary,
+        working_directory=Path(cache_dir or settings.cache_dir) / "quackosm",
+        verbosity_mode="silent",
+    )
+    check_cancel(cancel, stage="load_pois")
+    return split_quackosm_groups(gdf, categories)
+
+
+def _check_pbf_covers(pbf_bbox, area_bbox, pbf_path) -> None:
+    """Same coverage rule as the street-graph read (:mod:`segx.network.pbf`)."""
+    from segx.errors import OSMExtractError
+
+    if pbf_bbox is None:
+        return
+    if (
+        area_bbox[0] < pbf_bbox[0]
+        or area_bbox[1] < pbf_bbox[1]
+        or area_bbox[2] > pbf_bbox[2]
+        or area_bbox[3] > pbf_bbox[3]
+    ):
+        raise OSMExtractError(
+            f"The OpenStreetMap extract {Path(pbf_path).name} does not cover the study area: "
+            f"the file spans {tuple(pbf_bbox)}, the area needs {tuple(area_bbox)}. "
+            "Use an extract of a region that contains the whole boundary.",
+            details={"path": str(pbf_path), "pbf_bbox": list(pbf_bbox), "area_bbox": list(area_bbox)},
+        )
+
+
+def split_quackosm_groups(gdf: gpd.GeoDataFrame, categories: list[str]) -> dict[str, gpd.GeoDataFrame]:
+    """Turn QuackOSM's grouped-filter table into ``{category: features}``.
+
+    Each category's frame carries ``id`` (QuackOSM's ``feature_id``, e.g.
+    ``node/123``), the geometry, and the matched tag as a column (``leisure:
+    park``), which :func:`build_pois_gdf` keeps as the POI's tags.
+    """
     out: dict[str, gpd.GeoDataFrame] = {}
-    for category in settings.poi.categories_for("nearest"):
-        tags = settings.poi.presets[category]
-        out[category] = convert_geometry_to_geodataframe(
-            geometry_filter=wgs_boundary,
-            tags_filter=tags,
-            pbf_path=settings.network.osm_pbf_url,
+    ids = gdf.index.astype(str)
+    for category in categories:
+        if category not in gdf.columns:
+            out[category] = gpd.GeoDataFrame(geometry=[], crs=gdf.crs)
+            continue
+        hit = gdf[category].notna().to_numpy()
+        rows: list[dict[str, Any]] = []
+        for feature_id, matched, geom in zip(ids[hit], gdf[category][hit], gdf.geometry[hit], strict=True):
+            key, _, value = str(matched).partition("=")
+            rows.append({"id": feature_id, key: value, "geometry": geom})
+        out[category] = (
+            gpd.GeoDataFrame(rows, geometry="geometry", crs=gdf.crs)
+            if rows
+            else (gpd.GeoDataFrame(geometry=[], crs=gdf.crs))
         )
     return out
 
@@ -287,22 +368,35 @@ def load_pois(
     settings: Settings,
     *,
     cache_dir: Path | None = None,
-    fetcher: str = "osmnx",
+    fetcher: str = "auto",
     cancel: CancelCheck | None = None,
 ) -> LoadedPOIs:
     """Cache-aware POI extraction. Reads parquet if cached, else fetches.
 
-    ``fetcher`` ∈ ``{"osmnx", "quackosm"}``. The plan's default is QuackOSM
-    (faster, GeoParquet-native), but it requires a PBF source; OSMnx via
-    Overpass is the always-available fallback.
+    ``fetcher`` ∈ ``{"auto", "osmnx", "quackosm"}``. QuackOSM (faster,
+    GeoParquet-native) needs a PBF source; OSMnx via Overpass is the
+    always-available fallback. ``"auto"`` picks QuackOSM when
+    ``network.osm_pbf_url`` is set and OSMnx otherwise, so a run given a local
+    extract never depends on Overpass.
 
     The cache is written only after the fetch returned: a fetch that raises
     leaves no entry behind, so the next run asks again instead of reading a
     failure back as an empty area.
     """
+    from segx.network.builder import osm_source
+
+    if fetcher not in {"auto", "osmnx", "quackosm"}:
+        raise ConfigValueError(
+            f"unknown POI fetcher {fetcher!r}; expected 'auto', 'osmnx' or 'quackosm'",
+            details={"fetcher": fetcher, "expected": ["auto", "osmnx", "quackosm"]},
+        )
+    if fetcher == "auto":
+        fetcher = "quackosm" if settings.network.osm_pbf_url is not None else "osmnx"
+
     cache_dir = cache_dir or settings.cache_dir
     categories = settings.poi.categories_for("nearest")
-    key = pois_cache_key(boundary.bbox_wgs84, settings.network.osm_snapshot_date, categories)
+    source = osm_source(settings) if fetcher == "quackosm" else None
+    key = pois_cache_key(boundary.bbox_wgs84, settings.network.osm_snapshot_date, categories, source=source)
     cache_path = pois_cache_path(cache_dir, key)
 
     if cache_path.exists():
@@ -313,13 +407,8 @@ def load_pois(
 
     if fetcher == "osmnx":
         per_category = fetch_pois_osmnx(boundary, settings, cancel=cancel)
-    elif fetcher == "quackosm":
-        per_category = fetch_pois_quackosm(boundary, settings)
     else:
-        raise ConfigValueError(
-            f"unknown POI fetcher {fetcher!r}; expected 'osmnx' or 'quackosm'",
-            details={"fetcher": fetcher, "expected": ["osmnx", "quackosm"]},
-        )
+        per_category = fetch_pois_quackosm(boundary, settings, cache_dir=cache_dir, cancel=cancel)
 
     gdf = build_pois_gdf(per_category, working_crs=boundary.crs)
     cache_path.parent.mkdir(parents=True, exist_ok=True)

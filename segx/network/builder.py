@@ -267,6 +267,16 @@ def osm_source(settings: Settings) -> str | None:
     return source_id(settings.network.osm_pbf_url)
 
 
+def osm_snapshot_date(settings: Settings) -> str | None:
+    """The OSM snapshot a run used: the pinned ``network.osm_snapshot_date``, else
+    the local extract's header date, else ``None`` (live Overpass, "now")."""
+    if settings.network.osm_snapshot_date is not None or settings.network.osm_pbf_url is None:
+        return settings.network.osm_snapshot_date
+    from segx.network.pbf import read_header
+
+    return read_header(settings.network.osm_pbf_url).timestamp
+
+
 def load_or_fetch_graph(
     boundary: LoadedBoundary,
     mode: str,
@@ -359,6 +369,7 @@ __all__ = [
     "build_mode_graph",
     "fetch_raw_graph",
     "load_or_fetch_graph",
+    "osm_snapshot_date",
     "osm_source",
     "parse_maxspeed_kmh",
     "project_graph",

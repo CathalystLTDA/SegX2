@@ -130,7 +130,7 @@ def ingest(
     demographics_path: str | Path,
     od_pairs_path: str | Path | None = None,
     cache_dir: Path | None = None,
-    poi_fetcher: str = "osmnx",
+    poi_fetcher: str = "auto",
     progress: ProgressCallback | None = None,
     cancel: CancelCheck | None = None,
 ) -> IngestResult:
@@ -837,7 +837,7 @@ def run_pipeline(
     od_pairs_path: str | Path | None = None,
     output_dir: str | Path | None = None,
     cache_dir: Path | None = None,
-    poi_fetcher: str = "osmnx",
+    poi_fetcher: str = "auto",
     progress: ProgressCallback | None = None,
     cancel: CancelCheck | None = None,
 ) -> RunResult:

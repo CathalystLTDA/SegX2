@@ -139,6 +139,8 @@ def build_provenance(
     Nested values are kept as they are here; :func:`flatten_provenance` renders
     them for the file formats.
     """
+    from segx.network.builder import osm_snapshot_date, osm_source
+
     transit_meta = None
     if graphs is not None and "transit" in graphs:
         meta = dict(graphs.get("transit").graph.get("transit", {}))
@@ -156,7 +158,8 @@ def build_provenance(
         "engine_version": _engine_version(),
         "written_at": (written_at or datetime.now(UTC)).isoformat(timespec="seconds"),
         "working_crs": crs,
-        "osm_snapshot_date": settings.network.osm_snapshot_date,
+        "osm_snapshot_date": osm_snapshot_date(settings),
+        "osm_source": osm_source(settings) or "overpass",
         "network_modes": graphs.modes() if graphs is not None else [],
         "network_undirected": settings.network.undirected,
         "routing_engine": settings.routing.engine,
